@@ -1,0 +1,31 @@
+name: Refresh Charm Cache
+
+on:
+  workflow_call:
+    inputs:
+      charm_path:
+        description: Path to the charm directory
+        type: string
+        default: charm
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Restore charm cache (read-only)
+        id: charm-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ inputs.charm_path }}/*.charm
+          key: charm-${{ hashFiles(format('{0}/**', inputs.charm_path)) }}
+
+      - name: Touch cache to refresh last-used timestamp
+        if: steps.charm-cache.outputs.cache-hit == 'true'
+        run: |
+          ls -l ${{ inputs.charm_path }} || true

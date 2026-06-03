@@ -1,0 +1,96 @@
+name: Janitor
+
+on:
+  workflow_call:
+    inputs:
+      dry_run:
+        description: "Dry run"
+        type: boolean
+        default: true
+      keep_workflow:
+        description: "Workflow filename whose runs should never be deleted"
+        type: string
+        required: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Janitor (delete workflow runs)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+
+          REPO="${{ github.repository }}"
+          WORKFLOWS_DIR=".github/workflows"
+          KEEP_PIPELINE="${{ inputs.keep_workflow }}"
+
+          echo "Repo: $REPO"
+          echo "Dry run: $DRY_RUN"
+
+          delete_run_id() {
+            local run_id="$1"
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "DRY RUN: would delete run_id=$run_id"
+              return 0
+            fi
+            gh api -X DELETE "repos/$REPO/actions/runs/$run_id"
+          }
+
+          delete_runs_for_workflow() {
+            local workflow_file="$1"
+            local jq_filter="$2"
+            echo ""
+            echo "Workflow: $workflow_file"
+
+            local run_ids
+            run_ids="$(gh api "repos/$REPO/actions/workflows/$workflow_file/runs" --paginate --jq "$jq_filter" || true)"
+
+            if [[ -z "$run_ids" ]]; then
+              echo "No matching runs."
+              return 0
+            fi
+
+            local count
+            count="$(wc -l <<<"$run_ids" | tr -d ' ')"
+            echo "Found $count runs to delete."
+
+            while IFS= read -r run_id; do
+              [[ -z "$run_id" ]] && continue
+              delete_run_id "$run_id"
+            done <<<"$run_ids"
+          }
+
+          # Delete runs for all workflows in the repo, except $KEEP_PIPELINE
+          # For everything else: delete completed runs (success/cancelled/skipped/etc).
+          shopt -s nullglob
+          workflow_files=("$WORKFLOWS_DIR"/*.yml "$WORKFLOWS_DIR"/*.yaml)
+
+          if [[ ${#workflow_files[@]} -eq 0 ]]; then
+            echo "No workflow files found under $WORKFLOWS_DIR"
+            exit 0
+          fi
+
+          for wf_path in "${workflow_files[@]}"; do
+            wf_file="$(basename "$wf_path")"
+
+            if [[ "$wf_file" == "$KEEP_PIPELINE" ]]; then
+              echo "Skipping $wf_file."
+              continue
+            fi
+
+            # Default: delete all completed runs for this workflow.
+            delete_runs_for_workflow "$wf_file" \
+              '.workflow_runs[]
+               | select(.status == "completed")
+               | .id'
+          done

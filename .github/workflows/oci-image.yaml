@@ -1,0 +1,67 @@
+name: OCI image
+
+on:
+  workflow_call:
+    inputs:
+      repo_url:
+        description: Repository to clone and build
+        type: string
+        required: true
+      repo_branch:
+        description: Branch to clone and build
+        type: string
+        required: true
+      commit_sha:
+        description: Commit SHA to checkout
+        type: string
+        required: true
+
+permissions:
+  packages: write
+
+jobs:
+  handle-oci-image:
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - self-hosted-linux-amd64-noble-large
+    env:
+      IMAGE_TAG: ${{ inputs.commit_sha }}
+      IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha }}
+    steps:
+      - name: Clone upstream source
+        run: |
+          git clone --depth 1 --branch ${{ inputs.repo_branch }} ${{ inputs.repo_url }} upstream-repo
+
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Setup LXD
+        uses: canonical/setup-lxd@main
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push OCI image
+        id: image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: upstream-repo
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_URL }}
+
+      - name: Summary
+        run: echo "> OCI image pushed to $IMAGE_URL" >> $GITHUB_STEP_SUMMARY
