@@ -7,8 +7,8 @@ on:
         description: "Dry run"
         type: boolean
         default: true
-      keep_workflow:
-        description: "Workflow filename whose runs should never be deleted"
+      keep_workflows:
+        description: "Comma-separated list of workflow filenames whose runs should never be deleted"
         type: string
         required: false
 
@@ -30,7 +30,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
           REPO: ${{ github.repository }}
-          KEEP_PIPELINE: ${{ inputs.keep_workflow }}
+          KEEP_WORKFLOWS: ${{ inputs.keep_workflows }}
         run: |
           set -euo pipefail
 
@@ -72,7 +72,18 @@ jobs:
             done <<<"$run_ids"
           }
 
-          # Delete runs for all workflows in the repo, except $KEEP_PIPELINE
+          is_kept() {
+            local file="$1"
+            local kept
+            IFS=',' read -ra kept <<< "$KEEP_WORKFLOWS"
+            for entry in "${kept[@]}"; do
+              entry="${entry// /}"  # trim spaces
+              [[ "$file" == "$entry" ]] && return 0
+            done
+            return 1
+          }
+
+          # Delete runs for all workflows in the repo, except those in $KEEP_WORKFLOWS
           # For everything else: delete completed runs (success/cancelled/skipped/etc).
           shopt -s nullglob
           workflow_files=("$WORKFLOWS_DIR"/*.yml "$WORKFLOWS_DIR"/*.yaml)
@@ -85,7 +96,7 @@ jobs:
           for wf_path in "${workflow_files[@]}"; do
             wf_file="$(basename "$wf_path")"
 
-            if [[ "$wf_file" == "$KEEP_PIPELINE" ]]; then
+            if is_kept "$wf_file"; then
               echo "Skipping $wf_file."
               continue
             fi
