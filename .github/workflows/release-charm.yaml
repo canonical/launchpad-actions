@@ -36,9 +36,6 @@ on:
         value: ${{ jobs.release.outputs.resource_revision }}
 
 env:
-  CHARMHUB_NAME: ${{ inputs.charm_name }}
-  RESOURCE_NAME: ${{ inputs.resource_name }}
-  CHANNEL: ${{ inputs.channel }}
   IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha }}
 
 jobs:
@@ -53,7 +50,9 @@ jobs:
       - self-hosted-linux-amd64-noble-large
     steps:
       - name: Install charmcraft
-        run: sudo snap install --classic charmcraft --channel=${{ inputs.charmcraft_channel }}
+        env:
+          CHARMCRAFT_CHANNEL: ${{ inputs.charmcraft_channel }}
+        run: sudo snap install --classic charmcraft --channel="$CHARMCRAFT_CHANNEL"
 
       - name: Download charm artifact
         if: inputs.charm_cache_hit != 'true'
@@ -66,8 +65,12 @@ jobs:
         if: inputs.charm_cache_hit != 'true'
         env:
           CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
+          CHARMHUB_NAME: ${{ inputs.charm_name }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
-          charmcraft upload artifacts/charm/*.charm --name "${{ env.CHARMHUB_NAME }}" --release ${{ env.CHANNEL }}
+          charmcraft upload artifacts/charm/*.charm \
+            --name "$CHARMHUB_NAME" \
+            --release "$CHANNEL"
 
       - name: Pull GHCR image
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
@@ -79,33 +82,39 @@ jobs:
       - name: Upload image as resource
         env:
           CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
+          CHARMHUB_NAME: ${{ inputs.charm_name }}
+          RESOURCE_NAME: ${{ inputs.resource_name }}
+          IMAGE_URL: ${{ env.IMAGE_URL }}
         run: |
-          charmcraft upload-resource "${{ env.CHARMHUB_NAME }}" "${{ env.RESOURCE_NAME }}" \
-            --image "docker://${{ env.IMAGE_URL }}"
+          charmcraft upload-resource "$CHARMHUB_NAME" "$RESOURCE_NAME" \
+            --image "docker://${IMAGE_URL}"
 
       - name: Release
         id: release
         env:
           CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
+          CHARMHUB_NAME: ${{ inputs.charm_name }}
+          RESOURCE_NAME: ${{ inputs.resource_name }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
           REVISION_NUMBER=$( \
-            charmcraft revisions "${{ env.CHARMHUB_NAME }}" | \
+            charmcraft revisions "$CHARMHUB_NAME" | \
             awk 'NR==2 {print $1}' \
           )
           RESOURCE_REVISION_NUMBER=$( \
-            charmcraft resource-revisions "${{ env.CHARMHUB_NAME }}" "${{ env.RESOURCE_NAME }}" | \
+            charmcraft resource-revisions "$CHARMHUB_NAME" "$RESOURCE_NAME" | \
             awk 'NR==2 {print $1}' \
           )
-          charmcraft release "${{ env.CHARMHUB_NAME }}" \
-            --channel ${{ env.CHANNEL }} \
-            --revision $REVISION_NUMBER \
-            --resource ${{ env.RESOURCE_NAME }}:$RESOURCE_REVISION_NUMBER
+          charmcraft release "$CHARMHUB_NAME" \
+            --channel "$CHANNEL" \
+            --revision "$REVISION_NUMBER" \
+            --resource "${RESOURCE_NAME}:${RESOURCE_REVISION_NUMBER}"
 
           echo "charm_revision=$REVISION_NUMBER" >> "$GITHUB_OUTPUT"
           echo "resource_revision=$RESOURCE_REVISION_NUMBER" >> "$GITHUB_OUTPUT"
 
-          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
-          echo "**Charm Revision:** $REVISION_NUMBER" >> $GITHUB_STEP_SUMMARY
-          echo "**Resource Revision:** $RESOURCE_REVISION_NUMBER" >> $GITHUB_STEP_SUMMARY
-          echo "**Channel:** ${{ env.CHANNEL }}" >> $GITHUB_STEP_SUMMARY
+          echo "## Release Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Charm Revision:** $REVISION_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Resource Revision:** $RESOURCE_REVISION_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Channel:** ${CHANNEL}" >> "$GITHUB_STEP_SUMMARY"
