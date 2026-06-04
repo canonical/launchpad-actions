@@ -7,16 +7,8 @@ on:
         description: Git URL of the source repository to mirror from
         type: string
         required: true
-      target_branch:
-        description: Branch to sync
-        type: string
-        default: main
-      target_repo:
-        description: Target GitHub repository (owner/name)
-        type: string
-        default: ${{ github.repository }}
       trigger_workflow:
-        description: Optional downstream workflow file to trigger after a successful sync (e.g. pipeline.yaml)
+        description: Optional downstream workflow file to trigger after a successful sync
         type: string
         required: false
       trigger_ref:
@@ -27,20 +19,10 @@ on:
         description: JSON string of extra inputs for the triggered workflow
         type: string
         default: "{}"
-    secrets:
-      ssh_private_key:
-        description: SSH private key with push access to the target repository
-        required: true
     outputs:
       changed:
-        description: Whether source and target SHAs differed
+        description: Whether any ref differed between source and target
         value: ${{ jobs.sync.outputs.changed }}
-      source_sha:
-        description: Latest source commit SHA
-        value: ${{ jobs.sync.outputs.source_sha }}
-      target_sha:
-        description: Latest target commit SHA before sync
-        value: ${{ jobs.sync.outputs.target_sha }}
 
 permissions:
   contents: write
@@ -50,62 +32,57 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     outputs:
-      changed: ${{ steps.shas.outputs.changed }}
-      source_sha: ${{ steps.shas.outputs.source_sha }}
-      target_sha: ${{ steps.shas.outputs.target_sha }}
+      changed: ${{ steps.refs.outputs.changed }}
+      trigger_ref_changed: ${{ steps.refs.outputs.trigger_ref_changed }}
     steps:
-      - name: Compute source vs target SHAs
-        id: shas
+      - name: Compare all refs
+        id: refs
         env:
-          BRANCH: ${{ inputs.target_branch }}
-          REPO: ${{ inputs.target_repo }}
           SOURCE_URL: ${{ inputs.source_url }}
+          TARGET_REPO: ${{ github.repository }}
+          TRIGGER_REF: ${{ inputs.trigger_ref }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          SOURCE_SHA=$(git ls-remote "$SOURCE_URL" "refs/heads/${BRANCH}" | awk '{print $1}')
-          TARGET_SHA=$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
-                   "https://api.github.com/repos/$REPO/branches/$BRANCH" | jq -r .commit.sha)
-
-          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
-          echo "target_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
-
-          if [ "$SOURCE_SHA" = "$TARGET_SHA" ]; then
+          SOURCE_REFS=$(git ls-remote "$SOURCE_URL" || true)
+          TARGET_REFS=$(git ls-remote "https://x-access-token:${GITHUB_TOKEN}@github.com/${TARGET_REPO}.git" || true)
+          if [ "$SOURCE_REFS" = "$TARGET_REFS" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No changes detected - repositories are in sync"
+            echo "trigger_ref_changed=false" >> "$GITHUB_OUTPUT"
+            echo "All refs in sync"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Changes detected - sync required"
+            echo "Refs differ - sync required"
+            SOURCE_TRIGGER_SHA=$(git ls-remote "$SOURCE_URL" "$TRIGGER_REF" | awk '{print $1}')
+            TARGET_TRIGGER_SHA=$(git ls-remote "https://x-access-token:${GITHUB_TOKEN}@github.com/${TARGET_REPO}.git" "$TRIGGER_REF" | awk '{print $1}')
+            if [ "$SOURCE_TRIGGER_SHA" = "$TARGET_TRIGGER_SHA" ]; then
+              echo "trigger_ref_changed=false" >> "$GITHUB_OUTPUT"
+              echo "Trigger ref $TRIGGER_REF unchanged"
+            else
+              echo "trigger_ref_changed=true" >> "$GITHUB_OUTPUT"
+              echo "Trigger ref $TRIGGER_REF changed"
+            fi
           fi
 
-      - name: Setup SSH
-        if: steps.shas.outputs.changed == 'true'
-        uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
-        with:
-          ssh-private-key: ${{ secrets.ssh_private_key }}
-
-      - name: Mirror from source to target
-        if: steps.shas.outputs.changed == 'true'
+      - name: Mirror from source to GitHub
+        if: steps.refs.outputs.changed == 'true'
         env:
           SOURCE_URL: ${{ inputs.source_url }}
-          REPO: ${{ inputs.target_repo }}
-          SOURCE_SHA: ${{ steps.shas.outputs.source_sha }}
-          TARGET_SHA: ${{ steps.shas.outputs.target_sha }}
+          TARGET_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euxo pipefail
           echo "## Sync Status: Changes Detected" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Source SHA:** \`${SOURCE_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Target SHA:** \`${TARGET_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
 
           git clone --mirror "$SOURCE_URL" source-mirror.git
           cd source-mirror.git
-          git remote set-url --push origin "git@github.com:${REPO}.git"
+          git remote set-url --push origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${TARGET_REPO}.git"
           git push --mirror --force
 
   trigger:
     needs: sync
     runs-on: ubuntu-latest
-    if: needs.sync.outputs.changed == 'true' && inputs.trigger_workflow != ''
+    if: needs.sync.outputs.trigger_ref_changed == 'true' && inputs.trigger_workflow != ''
     permissions:
       contents: read
       actions: write
@@ -113,22 +90,18 @@ jobs:
       - name: Trigger downstream workflow
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ inputs.target_repo }}
+          TARGET_REPO: ${{ github.repository }}
           WORKFLOW: ${{ inputs.trigger_workflow }}
           REF: ${{ inputs.trigger_ref }}
           INPUTS_JSON: ${{ inputs.trigger_inputs_json }}
-          SOURCE_SHA: ${{ needs.sync.outputs.source_sha }}
         run: |
           set -euo pipefail
-
-          # Merge caller inputs with default commit_sha (caller-provided values take precedence)
-          merged_json=$(echo "$INPUTS_JSON" | jq --arg sha "$SOURCE_SHA" '.commit_sha //= $sha')
 
           args=()
           while IFS= read -r line; do
             [[ -n "$line" ]] && args+=("$line")
-          done < <(echo "$merged_json" | jq -r 'to_entries[] | "-f \(.key)=\(.value)"')
+          done < <(echo "$INPUTS_JSON" | jq -r 'to_entries[] | "-f \(.key)=\(.value)"')
 
-          gh workflow run "$WORKFLOW" -R "$REPO" --ref "$REF" "${args[@]}"
+          gh workflow run "$WORKFLOW" -R "$TARGET_REPO" --ref "$REF" "${args[@]}"
 
           echo "Triggered $WORKFLOW on ref $REF" >> "$GITHUB_STEP_SUMMARY"
