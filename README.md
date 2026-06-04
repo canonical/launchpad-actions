@@ -96,3 +96,37 @@ to `ghcr.io/<calling-repo>:<commit_sha>`.
 
 **Permissions required:** `packages: write`
 
+---
+
+### `sync.yaml` - Mirror a repository and trigger a downstream workflow
+
+Mirrors all refs from a source repository to the calling GitHub repository.
+Sync occurs whenever any ref differs between the two. Downstream triggering is
+gated independently on a specific named ref.
+
+**Behavior**
+
+- Compares the complete ref listing (`git ls-remote`) between source and the
+calling repository. Mirrors via `git push --mirror --force` whenever any ref
+differs.
+- If `trigger_workflow` is set, the downstream workflow is triggered **only**
+when the named `trigger_ref` changed — not when unrelated refs (tags, other
+branches) were updated. This avoids firing downstream pipelines
+unnecessarily while still pushing all changes.
+
+**Inputs**
+
+| Name | Required | Default | Description |
+|------|----------|---------|-------------|
+| `source_url` | Yes | - | Git URL of the source repository to mirror from |
+| `trigger_workflow` | No | - | Downstream workflow file to trigger after a successful sync |
+| `trigger_ref` | No | `main` | Ref whose change gates downstream triggering |
+| `trigger_inputs_json` | No | `{}` | JSON string of extra inputs for the triggered workflow |
+
+**Outputs**
+
+| Name | Description |
+|------|-------------|
+| `changed` | `true` if any ref differed between source and target |
+
+**Permissions required:** `contents: write`, `actions: write`

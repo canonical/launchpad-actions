@@ -1,0 +1,107 @@
+name: Sync
+
+on:
+  workflow_call:
+    inputs:
+      source_url:
+        description: Git URL of the source repository to mirror from
+        type: string
+        required: true
+      trigger_workflow:
+        description: Optional downstream workflow file to trigger after a successful sync
+        type: string
+        required: false
+      trigger_ref:
+        description: Git ref to pass to the triggered workflow
+        type: string
+        default: main
+      trigger_inputs_json:
+        description: JSON string of extra inputs for the triggered workflow
+        type: string
+        default: "{}"
+    outputs:
+      changed:
+        description: Whether any ref differed between source and target
+        value: ${{ jobs.sync.outputs.changed }}
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.refs.outputs.changed }}
+      trigger_ref_changed: ${{ steps.refs.outputs.trigger_ref_changed }}
+    steps:
+      - name: Compare all refs
+        id: refs
+        env:
+          SOURCE_URL: ${{ inputs.source_url }}
+          TARGET_REPO: ${{ github.repository }}
+          TRIGGER_REF: ${{ inputs.trigger_ref }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SOURCE_REFS=$(git ls-remote "$SOURCE_URL" || true)
+          TARGET_REFS=$(git ls-remote "https://x-access-token:${GITHUB_TOKEN}@github.com/${TARGET_REPO}.git" || true)
+          if [ "$SOURCE_REFS" = "$TARGET_REFS" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "trigger_ref_changed=false" >> "$GITHUB_OUTPUT"
+            echo "All refs in sync"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Refs differ - sync required"
+            SOURCE_TRIGGER_SHA=$(git ls-remote "$SOURCE_URL" "$TRIGGER_REF" | awk '{print $1}')
+            TARGET_TRIGGER_SHA=$(git ls-remote "https://x-access-token:${GITHUB_TOKEN}@github.com/${TARGET_REPO}.git" "$TRIGGER_REF" | awk '{print $1}')
+            if [ "$SOURCE_TRIGGER_SHA" = "$TARGET_TRIGGER_SHA" ]; then
+              echo "trigger_ref_changed=false" >> "$GITHUB_OUTPUT"
+              echo "Trigger ref $TRIGGER_REF unchanged"
+            else
+              echo "trigger_ref_changed=true" >> "$GITHUB_OUTPUT"
+              echo "Trigger ref $TRIGGER_REF changed"
+            fi
+          fi
+
+      - name: Mirror from source to GitHub
+        if: steps.refs.outputs.changed == 'true'
+        env:
+          SOURCE_URL: ${{ inputs.source_url }}
+          TARGET_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euxo pipefail
+          echo "## Sync Status: Changes Detected" >> "$GITHUB_STEP_SUMMARY"
+
+          git clone --mirror "$SOURCE_URL" source-mirror.git
+          cd source-mirror.git
+          git remote set-url --push origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${TARGET_REPO}.git"
+          git push --mirror --force
+
+  trigger:
+    needs: sync
+    runs-on: ubuntu-latest
+    if: needs.sync.outputs.trigger_ref_changed == 'true' && inputs.trigger_workflow != ''
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Trigger downstream workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPO: ${{ github.repository }}
+          WORKFLOW: ${{ inputs.trigger_workflow }}
+          REF: ${{ inputs.trigger_ref }}
+          INPUTS_JSON: ${{ inputs.trigger_inputs_json }}
+        run: |
+          set -euo pipefail
+
+          args=()
+          while IFS= read -r line; do
+            [[ -n "$line" ]] && args+=("$line")
+          done < <(echo "$INPUTS_JSON" | jq -r 'to_entries[] | "-f \(.key)=\(.value)"')
+
+          gh workflow run "$WORKFLOW" -R "$TARGET_REPO" --ref "$REF" "${args[@]}"
+
+          echo "Triggered $WORKFLOW on ref $REF" >> "$GITHUB_STEP_SUMMARY"
