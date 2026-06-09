@@ -16,6 +16,9 @@ using `actions/cache` to skip rebuilds when the charm source hasn't changed.
 | `commit_sha` | No | `github.sha` | Commit SHA to check out |
 | `charm_path` | No | `charm` | Path to the charm directory |
 | `charmcraft_channel` | No | `3.x/stable` | Charmcraft snap channel to install |
+| `runner_arch` | No | `amd64` | Runner architecture: `amd64`, `arm64`, `ppc64el`, `s390x` |
+| `runner_base` | No | `noble` | Runner base image: `focal`, `jammy`, `noble` |
+| `runner_flavor` | No | `large` | Runner flavor: `small`, `medium`, `large`, `large-extra`, `xlarge`, `xlarge-extra` |
 
 **Outputs**
 
@@ -40,6 +43,9 @@ them together on the specified channel.
 | `charm_name` | Yes | - | Name of the charm on Charmhub |
 | `resource_name` | Yes | - | Name of the OCI image resource on Charmhub |
 | `charmcraft_channel` | No | `3.x/stable` | Charmcraft snap channel to install |
+| `runner_arch` | No | `amd64` | Runner architecture: `amd64`, `arm64`, `ppc64el`, `s390x` |
+| `runner_base` | No | `noble` | Runner base image: `focal`, `jammy`, `noble` |
+| `runner_flavor` | No | `large` | Runner flavor: `small`, `medium`, `large`, `large-extra`, `xlarge`, `xlarge-extra` |
 
 **Outputs**
 
@@ -93,6 +99,9 @@ to `ghcr.io/<calling-repo>:<commit_sha>`.
 | `repo_url` | Yes | Repository URL to clone and build |
 | `repo_branch` | Yes | Branch to check out from the upstream repo |
 | `commit_sha` | Yes | Commit SHA used as the image tag |
+| `runner_arch` | No | Runner architecture: `amd64` (default), `arm64`, `ppc64el`, `s390x` |
+| `runner_base` | No | Runner base image: `focal`, `jammy`, `noble` (default) |
+| `runner_flavor` | No | Runner flavor: `small`, `medium`, `large` (default), `large-extra`, `xlarge`, `xlarge-extra` |
 
 **Permissions required:** `packages: write`
 

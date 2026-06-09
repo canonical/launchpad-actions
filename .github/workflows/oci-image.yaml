@@ -15,17 +15,25 @@ on:
         description: Commit SHA to checkout
         type: string
         required: true
+      runner_arch:
+        description: Runner architecture (amd64, arm64, ppc64el, s390x)
+        type: string
+        default: amd64
+      runner_base:
+        description: Runner base image (focal, jammy, noble)
+        type: string
+        default: noble
+      runner_flavor:
+        description: Runner flavor (small, medium, large, large-extra, xlarge, xlarge-extra)
+        type: string
+        default: large
 
 permissions:
   packages: write
 
 jobs:
   handle-oci-image:
-    runs-on:
-      - self-hosted
-      - linux
-      - x64
-      - self-hosted-linux-amd64-noble-large
+    runs-on: self-hosted-linux-${{ inputs.runner_arch }}-${{ inputs.runner_base }}-${{ inputs.runner_flavor }}
     env:
       IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha }}
     steps:

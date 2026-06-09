@@ -27,6 +27,18 @@ on:
         description: Charmcraft snap channel to install
         type: string
         default: 3.x/stable
+      runner_arch:
+        description: Runner architecture (amd64, arm64, ppc64el, s390x)
+        type: string
+        default: amd64
+      runner_base:
+        description: Runner base image (focal, jammy, noble)
+        type: string
+        default: noble
+      runner_flavor:
+        description: Runner flavor (small, medium, large, large-extra, xlarge, xlarge-extra)
+        type: string
+        default: large
     outputs:
       charm_revision:
         description: Charm revision released to Charmhub
@@ -43,11 +55,7 @@ jobs:
     outputs:
       charm_revision: ${{ steps.release.outputs.charm_revision }}
       resource_revision: ${{ steps.release.outputs.resource_revision }}
-    runs-on:
-      - self-hosted
-      - linux
-      - x64
-      - self-hosted-linux-amd64-noble-large
+    runs-on: self-hosted-linux-${{ inputs.runner_arch }}-${{ inputs.runner_base }}-${{ inputs.runner_flavor }}
     steps:
       - name: Install charmcraft
         env:
