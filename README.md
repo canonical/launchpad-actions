@@ -1,6 +1,9 @@
-# launchpad-actions
+# Launchpad Actions
 
 Reusable workflows used by the Launchpad team.
+
+Call them from a workflow in your repository with `uses:`, pinned to a commit
+SHA (shown as `@<ref>` below).
 
 ## Workflows
 
@@ -22,6 +25,18 @@ using `actions/cache` to skip rebuilds when the charm source hasn't changed.
 | Name | Description |
 |------|-------------|
 | `cache_hit` | `true` if the packed charm was served from cache |
+
+**Usage**
+
+```yaml
+jobs:
+  charm:
+    uses: canonical/launchpad-actions/.github/workflows/build-charm.yaml@<ref>
+    secrets: inherit
+    with:
+      commit_sha: ${{ github.sha }}
+      charm_path: "."
+```
 
 ---
 
@@ -48,7 +63,24 @@ them together on the specified channel.
 | `charm_revision` | Charm revision number released to Charmhub |
 | `resource_revision` | Resource revision number released to Charmhub |
 
-**Secrets required:** `CHARMHUB_TOKEN`
+**Secrets required:** `CHARMHUB_TOKEN` — pass `secrets: inherit` from the
+calling job.
+
+**Usage**
+
+```yaml
+jobs:
+  release:
+    needs: [oci-image, charm]
+    uses: canonical/launchpad-actions/.github/workflows/release-charm.yaml@<ref>
+    secrets: inherit
+    with:
+      charm_cache_hit: ${{ needs.charm.outputs.cache_hit }}
+      commit_sha: ${{ inputs.upstream_sha }}
+      channel: ${{ inputs.channel }}
+      charm_name: forgejo-k8s
+      resource_name: forgejo-image
+```
 
 ---
 
@@ -62,9 +94,29 @@ calling repository.
 | Name | Required | Default | Description |
 |------|----------|---------|-------------|
 | `dry_run` | No | `true` | When `true`, log what would be deleted without actually deleting |
-| `keep_workflow` | No | - | Filename of a workflow whose runs should never be deleted (e.g. `deploy.yaml`) |
+| `keep_workflows` | No | - | Comma-separated list of workflow filenames whose runs should never be deleted (e.g. `pipeline.yaml,prek.yaml`) |
 
 **Permissions required:** `actions: write`, `contents: read`
+
+**Usage**
+
+```yaml
+on:
+  schedule:
+    - cron: '0 0 * * *' # Daily at midnight UTC
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    uses: canonical/launchpad-actions/.github/workflows/janitor.yaml@<ref>
+    with:
+      dry_run: false
+      keep_workflows: "pipeline.yaml,prek.yaml"
+```
 
 ---
 
@@ -78,6 +130,20 @@ timestamp, preventing GitHub's cache eviction policy from expiring it.
 | Name | Required | Default | Description |
 |------|----------|---------|-------------|
 | `charm_path` | No | `charm` | Path to the charm directory |
+
+**Usage**
+
+```yaml
+on:
+  schedule:
+    - cron: '0 0 */6 * *' # Every ~6 days at 00:00 UTC
+
+jobs:
+  refresh:
+    uses: canonical/launchpad-actions/.github/workflows/refresh-charm-cache.yaml@<ref>
+    with:
+      charm_path: "."
+```
 
 ---
 
@@ -95,6 +161,51 @@ to `ghcr.io/<calling-repo>:<commit_sha>`.
 | `commit_sha` | Yes | Commit SHA used as the image tag |
 
 **Permissions required:** `packages: write`
+
+**Usage**
+
+```yaml
+jobs:
+  oci-image:
+    permissions:
+      contents: read
+      packages: write
+    uses: canonical/launchpad-actions/.github/workflows/oci-image.yaml@<ref>
+    with:
+      repo_url: https://codeberg.org/forgejo/forgejo.git
+      repo_branch: forgejo
+      commit_sha: ${{ inputs.upstream_sha }}
+```
+
+---
+
+### `prek.yaml` - Run prek (pre-commit) checks
+
+Runs [prek](https://github.com/j178/prek) pre-commit hooks on the calling
+repository. Takes no inputs.
+
+**Permissions required:** `contents: read`
+
+**Usage**
+
+```yaml
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_call:
+  schedule:
+    - cron: "0 0 * * *" # Daily at midnight UTC
+
+permissions: read-all
+
+jobs:
+  prek:
+    uses: canonical/launchpad-actions/.github/workflows/prek.yaml@<ref>
+```
 
 ---
 
@@ -130,3 +241,24 @@ unnecessarily while still pushing all changes.
 | `changed` | `true` if any ref differed between source and target |
 
 **Permissions required:** `contents: write`, `actions: write`
+
+**Usage**
+
+```yaml
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  sync:
+    uses: canonical/launchpad-actions/.github/workflows/sync.yaml@<ref>
+    with:
+      source_url: https://codeberg.org/forgejo/forgejo.git
+      trigger_workflow: pipeline.yaml
+      trigger_ref: main
+```
