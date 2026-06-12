@@ -57,6 +57,7 @@ them together on the specified channel.
 | `channel` | Yes | - | Charmhub channel to release to (e.g. `latest/edge`) |
 | `charm_name` | Yes | - | Name of the charm on Charmhub |
 | `resource_name` | Yes | - | Name of the OCI image resource on Charmhub |
+| `skip_resource_upload` | No | `false` | Skip uploading the OCI image resource (use latest existing revision) |
 | `charmcraft_channel` | No | `3.x/stable` | Charmcraft snap channel to install |
 | `runner_arch` | No | `amd64` | Runner architecture: `amd64`, `arm64`, `ppc64el`, `s390x` |
 | `runner_base` | No | `noble` | Runner base image: `focal`, `jammy`, `noble` |
@@ -86,6 +87,7 @@ jobs:
       channel: ${{ inputs.channel }}
       charm_name: forgejo-k8s
       resource_name: forgejo-image
+      skip_resource_upload: ${{ needs.charm.outputs.cache_hit == 'true' }}
 ```
 
 ---
