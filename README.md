@@ -43,6 +43,53 @@ jobs:
 
 ---
 
+### `remote-build-rock.yaml` - Build and push rock image
+
+Builds a rock image with [rockcraft](https://canonical-rockcraft.readthedocs-hosted.com/)
+using [remote build](https://documentation.ubuntu.com/craft-application/latest/how-to/build-remotely/),
+which offloads the build to Launchpad's build farm instead of the GitHub
+runner. The project source is uploaded publicly to Launchpad
+(`--launchpad-accept-public-upload`). Caches the `.rock` file by commit SHA,
+pushes it to `ghcr.io/<calling-repo>:<commit_sha>`, and uploads the `.rock`
+file as a workflow artifact. Launchpad build logs are printed in the job
+output on cache misses.
+
+**Inputs**
+
+| Name | Required | Default | Description |
+|------|----------|---------|-------------|
+| `commit_sha` | No | `github.sha` | Commit SHA to check out and use as the image tag |
+
+**Outputs**
+
+| Name | Description |
+|------|-------------|
+| `rock_artifact_id` | ID of the uploaded rock artifact |
+| `rock_artifact_url` | URL of the uploaded rock artifact |
+| `cache_hit` | `true` if the rock was served from cache |
+
+**Secrets required:** `ROCKCRAFT_LAUNCHPAD_CREDENTIALS` — the full contents of
+`~/.local/share/rockcraft/launchpad-credentials`; pass `secrets: inherit` from
+the calling job.
+
+**Permissions required:** `contents: read`, `packages: write`
+
+**Usage**
+
+```yaml
+jobs:
+  rock:
+    permissions:
+      contents: read
+      packages: write
+    uses: canonical/launchpad-actions/.github/workflows/remote-build-rock.yaml@<ref>
+    secrets: inherit
+    with:
+      commit_sha: ${{ github.sha }}
+```
+
+---
+
 ### `release-charm.yaml` - Release charm and OCI resource to Charmhub
 
 Uploads the packed charm and an OCI image resource to Charmhub, then releases
@@ -88,6 +135,73 @@ jobs:
       charm_name: forgejo-k8s
       resource_name: forgejo-image
       skip_resource_upload: ${{ needs.charm.outputs.cache_hit == 'true' }}
+```
+
+**Full pipeline: publish a charm and its rock to Charmhub**
+
+Combines `remote-build-rock.yaml`, `build-charm.yaml`, and `release-charm.yaml` into
+a single publish workflow. Pushes to `main` auto-publish on the `edge`
+channel; `workflow_dispatch` allows picking the channel manually.
+
+```yaml
+name: Publish
+# Orchestrates rock build, charm pack, and Charmhub release.
+#
+# Required secrets:
+#   ROCKCRAFT_LAUNCHPAD_CREDENTIALS — contents of
+#     ~/.local/share/rockcraft/launchpad-credentials
+#   CHARMHUB_TOKEN — charmcraft credentials (`charmcraft login --export`)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Charmhub channel
+        type: choice
+        options:
+          - edge
+          - stable
+        default: edge
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rock:
+    permissions:
+      contents: read
+      packages: write
+    uses: canonical/launchpad-actions/.github/workflows/remote-build-rock.yaml@<ref>
+    secrets: inherit
+    with:
+      commit_sha: ${{ github.sha }}
+
+  charm:
+    uses: canonical/launchpad-actions/.github/workflows/build-charm.yaml@<ref>
+    with:
+      commit_sha: ${{ github.sha }}
+      charm_path: "."
+
+  release:
+    needs: [rock, charm]
+    permissions:
+      contents: read
+      packages: read
+    uses: canonical/launchpad-actions/.github/workflows/release-charm.yaml@<ref>
+    secrets: inherit
+    with:
+      charm_cache_hit: ${{ needs.charm.outputs.cache_hit }}
+      commit_sha: ${{ github.sha }}
+      channel: ${{ inputs.channel || 'edge' }}
+      charm_name: my-charm
+      resource_name: app-image
 ```
 
 ---
