@@ -23,6 +23,10 @@ on:
         description: Name of the resource to release
         type: string
         required: true
+      skip_resource_upload:
+        description: Skip uploading the OCI image resource (use latest existing revision)
+        type: boolean
+        default: false
       charmcraft_channel:
         description: Charmcraft snap channel to install
         type: string
@@ -86,6 +90,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ ! inputs.skip_resource_upload }}
 
       - name: Upload image as resource
         env:
@@ -96,6 +101,7 @@ jobs:
         run: |
           charmcraft upload-resource "$CHARMHUB_NAME" "$RESOURCE_NAME" \
             --image "docker://${IMAGE_URL}"
+        if: ${{ ! inputs.skip_resource_upload }}
 
       - name: Release
         id: release
@@ -104,8 +110,16 @@ jobs:
           CHARMHUB_NAME: ${{ inputs.charm_name }}
           RESOURCE_NAME: ${{ inputs.resource_name }}
           CHANNEL: ${{ inputs.channel }}
+          SKIP_RESOURCE_UPLOAD: ${{ inputs.skip_resource_upload }}
         run: |
           set -euo pipefail
+          # TODO: REVISION_NUMBER and RESOURCE_REVISION_NUMBER are fetched as the
+          # latest revision from Charmhub (awk 'NR==2'). When charm_cache_hit or
+          # skip_resource_upload caused the upload steps to be skipped, the "latest"
+          # revision may not correspond to the cached artifact being released.
+          # A proper fix would capture the revision number from the upload command's
+          # stdout and pass it forward as a step output, falling back to the latest
+          # only when the upload was skipped.
           REVISION_NUMBER=$( \
             charmcraft revisions "$CHARMHUB_NAME" | \
             awk 'NR==2 {print $1}' \
@@ -126,3 +140,7 @@ jobs:
           echo "**Charm Revision:** $REVISION_NUMBER" >> "$GITHUB_STEP_SUMMARY"
           echo "**Resource Revision:** $RESOURCE_REVISION_NUMBER" >> "$GITHUB_STEP_SUMMARY"
           echo "**Channel:** ${CHANNEL}" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$SKIP_RESOURCE_UPLOAD" = "true" ]; then
+            echo "**Resource Upload:** Skipped (using existing revision)" >> "$GITHUB_STEP_SUMMARY"
+          fi
