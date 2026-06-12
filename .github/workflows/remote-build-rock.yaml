@@ -1,0 +1,121 @@
+name: Rock
+
+on:
+  workflow_call:
+    inputs:
+      commit_sha:
+        description: Commit SHA to checkout and tag the GHCR image
+        type: string
+        required: false
+    outputs:
+      rock_artifact_id:
+        description: ID of the uploaded rock artifact
+        value: ${{ jobs.handle-rock.outputs.rock_artifact_id }}
+      rock_artifact_url:
+        description: URL of the uploaded rock artifact
+        value: ${{ jobs.handle-rock.outputs.rock_artifact_url }}
+      cache_hit:
+        description: Whether the rock cache was hit
+        value: ${{ jobs.handle-rock.outputs.cache_hit }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  handle-rock:
+    outputs:
+      rock_artifact_id: ${{ steps.upload-rock.outputs.artifact-id }}
+      rock_artifact_url: ${{ steps.upload-rock.outputs.artifact-url }}
+      cache_hit: ${{ steps.rock-cache.outputs.cache-hit }}
+    runs-on: ubuntu-latest
+    env:
+      COMMIT_SHA: ${{ inputs.commit_sha || github.sha }}
+      IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha || github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Cache rock
+        id: rock-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: "*.rock"
+          key: rock-${{ env.COMMIT_SHA }}
+
+      - name: Install rockcraft
+        run: sudo snap install --classic rockcraft
+
+      - name: Write Launchpad credentials
+        if: steps.rock-cache.outputs.cache-hit != 'true'
+        env:
+          ROCKCRAFT_LAUNCHPAD_CREDENTIALS: ${{ secrets.ROCKCRAFT_LAUNCHPAD_CREDENTIALS }}
+        run: |
+          mkdir -p ~/.local/share/rockcraft
+          printf '%s' "$ROCKCRAFT_LAUNCHPAD_CREDENTIALS" > ~/.local/share/rockcraft/launchpad-credentials
+          chmod 600 ~/.local/share/rockcraft/launchpad-credentials
+
+      - name: Build rock on Launchpad
+        if: steps.rock-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          echo "::group::rockcraft remote-build"
+          rockcraft remote-build \
+            --launchpad-accept-public-upload \
+            --launchpad-timeout=7200 && status=0 || status=$?
+          echo "::endgroup::"
+          exit "$status"
+
+      - name: Show Launchpad build logs
+        if: always() && steps.rock-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          shopt -s nullglob
+
+          launchpad_logs=(rockcraft-*.txt)
+          if [ "${#launchpad_logs[@]}" -eq 0 ]; then
+            echo "::warning::No Launchpad build log files were written"
+            exit 0
+          fi
+
+          for log_file in "${launchpad_logs[@]}"; do
+            echo "::group::Launchpad build log (${log_file})"
+            # Prefix each line so log content cannot trigger workflow commands
+            sed 's/^/  /' -- "$log_file"
+            echo "::endgroup::"
+          done
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push rock to ghcr.io
+        run: |
+          shopt -s nullglob
+          rock_files=(*.rock)
+
+          if [ "${#rock_files[@]}" -ne 1 ]; then
+            echo "Expected exactly one .rock file, found ${#rock_files[@]}" >&2
+            exit 1
+          fi
+
+          rockcraft.skopeo --insecure-policy copy \
+            "oci-archive:${rock_files[0]}" \
+            "docker://${IMAGE_URL}"
+
+          echo "> Rock image pushed to $IMAGE_URL" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload rock artifact
+        id: upload-rock
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rocks-${{ env.COMMIT_SHA }}
+          path: "*.rock"
+          if-no-files-found: error
