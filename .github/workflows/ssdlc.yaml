@@ -1,0 +1,126 @@
+name: SSDLC
+
+on:
+  workflow_call:
+    inputs:
+      commit_sha:
+        description: Commit SHA to checkout and locate artifacts
+        type: string
+        required: true
+      charm_name:
+        description: >-
+          Charmhub name of the charm, or semicolon-separated names when multiple
+          charm files are present (must match file count and order)
+        type: string
+        required: true
+      charm_path:
+        description: Path to the charm directory (must match the value used when building)
+        type: string
+        default: charm
+      rock_name:
+        description: >-
+          Name of the rock, or semicolon-separated names when multiple rock files
+          are present (must match file count and order)
+        type: string
+        required: true
+      ssdlc_email:
+        description: Email address for SSDLC SBOM service submissions
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  ssdlc:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ inputs.commit_sha }}
+          persist-credentials: false
+
+      - name: Restore charm from cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ inputs.charm_path }}/*.charm
+          key: charm-${{ hashFiles(format('{0}/**', inputs.charm_path)) }}
+
+      - name: Download rock artifact
+        id: download-rock
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rocks-${{ inputs.commit_sha }}
+          path: artifacts/rock
+
+      - name: Generate manifest
+        id: generate-manifest
+        if: steps.download-rock.outcome == 'success'
+        env:
+          CHARM_NAME: ${{ inputs.charm_name }}
+          CHARM_PATH: ${{ inputs.charm_path }}
+          ROCK_NAME: ${{ inputs.rock_name }}
+          SSDLC_EMAIL: ${{ inputs.ssdlc_email }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p ssdlc-manifests
+
+          charm_files=("${CHARM_PATH}"/*.charm)
+          rock_files=(artifacts/rock/*.rock)
+
+          if [ "${#charm_files[@]}" -eq 0 ]; then
+            echo "No charm files found in ${CHARM_PATH}/" >&2
+            exit 1
+          fi
+          if [ "${#rock_files[@]}" -eq 0 ]; then
+            echo "No rock files found in artifacts/rock/" >&2
+            exit 1
+          fi
+
+          IFS=';' read -ra charm_names <<< "${CHARM_NAME}"
+          IFS=';' read -ra rock_names <<< "${ROCK_NAME}"
+
+          if [ "${#charm_names[@]}" -gt 1 ] && [ "${#charm_names[@]}" -ne "${#charm_files[@]}" ]; then
+            echo "charm_name has ${#charm_names[@]} entries but found ${#charm_files[@]} charm files" >&2
+            exit 1
+          fi
+          if [ "${#rock_names[@]}" -gt 1 ] && [ "${#rock_names[@]}" -ne "${#rock_files[@]}" ]; then
+            echo "rock_name has ${#rock_names[@]} entries but found ${#rock_files[@]} rock files" >&2
+            exit 1
+          fi
+
+          cat > ssdlc-manifests/manifest.yaml << EOF
+          clients:
+            sbom:
+              service_url: https://sbom-request.canonical.com  # WARNING: unstable!
+              department: saas_engineering
+              email: ${SSDLC_EMAIL}
+              team: launchpad
+            secscan: {}
+
+          artifacts:
+          EOF
+
+          for i in "${!charm_files[@]}"; do
+            echo "  - name: ${charm_names[$i]:-${charm_names[0]}}" >> ssdlc-manifests/manifest.yaml
+            echo "    source: ${charm_files[$i]}" >> ssdlc-manifests/manifest.yaml
+            echo "    type: charm" >> ssdlc-manifests/manifest.yaml
+          done
+
+          for i in "${!rock_files[@]}"; do
+            echo "  - name: ${rock_names[$i]:-${rock_names[0]}}" >> ssdlc-manifests/manifest.yaml
+            echo "    source: ${rock_files[$i]}" >> ssdlc-manifests/manifest.yaml
+            echo "    type: rock" >> ssdlc-manifests/manifest.yaml
+          done
+
+      - name: Run SSDLC scan
+        if: steps.generate-manifest.outcome == 'success'
+        uses: canonical/sbomber/.github/actions/run@7a6c0b5f115b2b739d22a595257aa3a73590ed61 # main
+        with:
+          manifest: "${{ github.workspace }}/ssdlc-manifests/manifest.yaml"
+          artifact-name: ssdlc-scan

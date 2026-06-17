@@ -216,6 +216,59 @@ jobs:
       channel: ${{ inputs.channel || 'edge' }}
       charm_name: my-charm
       resource_name: app-image
+
+  ssdlc:
+    needs: [release]
+    uses: canonical/launchpad-actions/.github/workflows/ssdlc.yaml@<ref>
+    secrets: inherit
+    with:
+      commit_sha: ${{ github.sha }}
+      charm_name: my-charm
+      charm_path: "."
+      rock_name: my-rock
+      ssdlc_email: ${{ vars.SSDLC_EMAIL }}
+```
+
+---
+
+### `ssdlc.yaml` - SSDLC compliance scan
+
+Runs an SSDLC compliance scan (SBOM generation and security scanning) against
+the charm and rock artifacts produced by `build-charm.yaml` and
+`build-rock.yaml`, using [sbomber](https://github.com/canonical/sbomber).
+
+The charm is restored from the GitHub Actions cache — always available
+regardless of whether a new build ran this workflow. The rock is downloaded
+from the artifact uploaded by `build-rock.yaml`. Failures are absorbed:
+`continue-on-error: true` on the job means a scan failure never propagates to
+the calling workflow.
+
+**Inputs**
+
+| Name | Required | Default | Description |
+|------|----------|---------|-------------|
+| `commit_sha` | Yes | - | Commit SHA to checkout and locate artifacts |
+| `charm_name` | Yes | - | Charmhub name of the charm; semicolon-separated when multiple charm files are present (must match file count and order) |
+| `charm_path` | No | `charm` | Path to the charm directory (must match the value passed to `build-charm.yaml`) |
+| `rock_name` | Yes | - | Name of the rock; semicolon-separated when multiple rock files are present (must match file count and order) |
+| `ssdlc_email` | Yes | - | Email address for SSDLC SBOM service submissions |
+
+**Permissions required:** `contents: read`, `actions: read`
+
+**Usage**
+
+```yaml
+jobs:
+  ssdlc:
+    needs: [release]
+    uses: canonical/launchpad-actions/.github/workflows/ssdlc.yaml@<ref>
+    secrets: inherit
+    with:
+      commit_sha: ${{ github.sha }}
+      charm_name: my-charm
+      charm_path: "."
+      rock_name: my-rock
+      ssdlc_email: ${{ vars.SSDLC_EMAIL }}
 ```
 
 ---
