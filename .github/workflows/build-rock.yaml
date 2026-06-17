@@ -6,10 +6,22 @@ on:
         description: Commit SHA to checkout and tag the GHCR image
         type: string
         required: false
-      use_launchpad:
+      use_launchpad_remote_build:
         description: Build on Launchpad remote builders instead of a self-hosted runner
         type: boolean
         default: false
+      runner_arch:
+        description: Runner architecture (amd64, arm64, ppc64el, s390x)
+        type: string
+        default: amd64
+      runner_base:
+        description: Runner base image (focal, jammy, noble)
+        type: string
+        default: noble
+      runner_flavor:
+        description: Runner flavor (small, medium, large, large-extra, xlarge, xlarge-extra)
+        type: string
+        default: large
     outputs:
       rock_artifact_id:
         description: ID of the uploaded rock artifact
@@ -30,7 +42,7 @@ jobs:
   # The calling job must pass secrets: inherit and have
   # LAUNCHPAD_CREDENTIALS configured.
   handle-rock-remote:
-    if: ${{ inputs.use_launchpad }}
+    if: ${{ inputs.use_launchpad_remote_build }}
     outputs:
       rock_artifact_id: ${{ steps.upload-rock.outputs.artifact-id }}
       rock_artifact_url: ${{ steps.upload-rock.outputs.artifact-url }}
@@ -129,66 +141,73 @@ jobs:
 
   # Local build (self-hosted runner, snap-installed rockcraft).
   handle-rock-local:
-    if: ${{ !inputs.use_launchpad }}
+    if: ${{ !inputs.use_launchpad_remote_build }}
     outputs:
       rock_artifact_id: ${{ steps.upload-rock.outputs.artifact-id }}
       rock_artifact_url: ${{ steps.upload-rock.outputs.artifact-url }}
-      cache_hit: "false"
-    runs-on:
-      - self-hosted
-      - linux
-      - x64
-      - self-hosted-linux-amd64-noble-large
+      cache_hit: ${{ steps.rock-cache.outputs.cache-hit }}
+    runs-on: self-hosted-linux-${{ inputs.runner_arch }}-${{ inputs.runner_base }}-${{ inputs.runner_flavor }}
     env:
       COMMIT_SHA: ${{ inputs.commit_sha || github.sha }}
       IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha || github.sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ env.COMMIT_SHA }}
           persist-credentials: false
 
+      - name: Cache rock
+        id: rock-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: "*.rock"
+          key: rock-${{ env.COMMIT_SHA }}
+
       - name: Setup LXD
-        uses: canonical/setup-lxd@d492474f6c8ceed1b716bb34c8f575a428871c70 # main
+        if: steps.rock-cache.outputs.cache-hit != 'true'
+        uses: canonical/setup-lxd@da2ac84e727dc534215fd14cd088b9209d65893b # v1.0.0
 
       - name: Install rockcraft
+        if: steps.rock-cache.outputs.cache-hit != 'true'
         run: sudo snap install --classic rockcraft
 
-      - name: Create version metadata file
-        run: |
-          cat > version.json << EOF
-          {
-            "version": "$(grep '^version' pyproject.toml | cut -d '"' -f 2)",
-            "vcs_revision": "${COMMIT_SHA}"
-          }
-          EOF
-          echo "Created version.json:"
-          cat version.json
-
       - name: Pack rock
+        if: steps.rock-cache.outputs.cache-hit != 'true'
         env:
           ROCKCRAFT_ENABLE_EXPERIMENTAL_EXTENSIONS: "true"
         run: |
           rockcraft pack -v
 
+      - name: Log in to ghcr.io
+        if: steps.rock-cache.outputs.cache-hit != 'true'
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push rock to ghcr.io
+        if: steps.rock-cache.outputs.cache-hit != 'true'
+        run: |
+          shopt -s nullglob
+          rock_files=(*.rock)
+
+          if [ "${#rock_files[@]}" -ne 1 ]; then
+            echo "Expected exactly one .rock file, found ${#rock_files[@]}" >&2
+            exit 1
+          fi
+
+          rockcraft.skopeo --insecure-policy copy \
+            "oci-archive:${rock_files[0]}" \
+            "docker://${IMAGE_URL}"
+
+          echo "> Rock image pushed to $IMAGE_URL" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload rock artifact
         id: upload-rock
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rock
-          path: ./*.rock
-
-      - name: Push OCI to GHCR with GITHUB_TOKEN
-        env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ROCK_FILE=$(ls *.rock | head -n1)
-          echo "Pushing $ROCK_FILE to ${IMAGE_URL}"
-          rockcraft.skopeo --insecure-policy copy \
-            oci-archive:"$ROCK_FILE" \
-            docker://"$IMAGE_URL" \
-            --dest-creds "${{ github.repository_owner }}:$TOKEN"
-
-      - name: Summary
-        run: echo "> Rock pushed to $IMAGE_URL" >> $GITHUB_STEP_SUMMARY
+          name: rocks-${{ env.COMMIT_SHA }}
+          path: "*.rock"
+          if-no-files-found: error

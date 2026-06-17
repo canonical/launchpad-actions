@@ -11,7 +11,7 @@ SHA (shown as `@<ref>` below).
 
 Packs a Juju charm with [charmcraft](https://juju.is/docs/sdk/charmcraft),
 using `actions/cache` to skip rebuilds when the charm source hasn't changed.
-By default it builds on a self-hosted runner; set `use_launchpad: true` to
+By default it builds on a self-hosted runner; set `use_launchpad_remote_build: true` to
 offload the build to Launchpad's remote build farm instead.
 
 **Inputs**
@@ -21,7 +21,7 @@ offload the build to Launchpad's remote build farm instead.
 | `commit_sha` | No | `github.sha` | Commit SHA to check out |
 | `charm_path` | No | `charm` | Path to the charm directory |
 | `charmcraft_channel` | No | `3.x/stable` | Charmcraft snap channel to install |
-| `use_launchpad` | No | `false` | Build on Launchpad remote builders instead of a self-hosted runner |
+| `use_launchpad_remote_build` | No | `false` | Build on Launchpad remote builders instead of a self-hosted runner |
 | `runner_arch` | No | `amd64` | Runner architecture: `amd64`, `arm64`, `ppc64el`, `s390x` |
 | `runner_base` | No | `noble` | Runner base image: `focal`, `jammy`, `noble` |
 | `runner_flavor` | No | `large` | Runner flavor: `small`, `medium`, `large`, `large-extra`, `xlarge`, `xlarge-extra` |
@@ -32,7 +32,7 @@ offload the build to Launchpad's remote build farm instead.
 |------|-------------|
 | `cache_hit` | `true` if the packed charm was served from cache |
 
-**Secrets required (when `use_launchpad: true`):** `LAUNCHPAD_CREDENTIALS` —
+**Secrets required (when `use_launchpad_remote_build: true`):** `LAUNCHPAD_CREDENTIALS` —
 the full contents of `~/.local/share/charmcraft/launchpad-credentials`;
 pass `secrets: inherit` from the calling job.
 
@@ -46,7 +46,7 @@ jobs:
     with:
       commit_sha: ${{ github.sha }}
       charm_path: "."
-      use_launchpad: true
+      use_launchpad_remote_build: true
 ```
 
 ---
@@ -54,7 +54,7 @@ jobs:
 ### `build-rock.yaml` - Build and push rock image
 
 Builds a rock image with [rockcraft](https://canonical-rockcraft.readthedocs-hosted.com/).
-By default it builds on a self-hosted runner; set `use_launchpad: true` to
+By default it builds on a self-hosted runner; set `use_launchpad_remote_build: true` to
 offload the build to Launchpad's remote build farm instead.
 Caches the `.rock` file by commit SHA, pushes it to
 `ghcr.io/<calling-repo>:<commit_sha>`, and uploads the `.rock` file as a
@@ -65,7 +65,10 @@ workflow artifact.
 | Name | Required | Default | Description |
 |------|----------|---------|-------------|
 | `commit_sha` | No | `github.sha` | Commit SHA to check out and use as the image tag |
-| `use_launchpad` | No | `false` | Build on Launchpad remote builders instead of a self-hosted runner |
+| `use_launchpad_remote_build` | No | `false` | Build on Launchpad remote builders instead of a self-hosted runner |
+| `runner_arch` | No | `amd64` | Runner architecture: `amd64`, `arm64`, `ppc64el`, `s390x` |
+| `runner_base` | No | `noble` | Runner base image: `focal`, `jammy`, `noble` |
+| `runner_flavor` | No | `large` | Runner flavor: `small`, `medium`, `large`, `large-extra`, `xlarge`, `xlarge-extra` |
 
 **Outputs**
 
@@ -75,7 +78,7 @@ workflow artifact.
 | `rock_artifact_url` | URL of the uploaded rock artifact |
 | `cache_hit` | `true` if the rock was served from cache |
 
-**Secrets required (when `use_launchpad: true`):** `LAUNCHPAD_CREDENTIALS` —
+**Secrets required (when `use_launchpad_remote_build: true`):** `LAUNCHPAD_CREDENTIALS` —
 the full contents of `~/.local/share/rockcraft/launchpad-credentials`;
 pass `secrets: inherit` from the calling job.
 
@@ -93,7 +96,7 @@ jobs:
     secrets: inherit
     with:
       commit_sha: ${{ github.sha }}
-      use_launchpad: true
+      use_launchpad_remote_build: true
 ```
 
 ---
