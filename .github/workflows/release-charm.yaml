@@ -52,7 +52,7 @@ on:
         value: ${{ jobs.release.outputs.resource_revision }}
 
 env:
-  IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha }}
+  IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha }}-${{ inputs.runner_arch }}
 
 jobs:
   release:

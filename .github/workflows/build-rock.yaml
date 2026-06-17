@@ -123,21 +123,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push rock to ghcr.io
+      - name: Push rocks to ghcr.io
         run: |
           shopt -s nullglob
           rock_files=(*.rock)
 
-          if [ "${#rock_files[@]}" -ne 1 ]; then
-            echo "Expected exactly one .rock file, found ${#rock_files[@]}" >&2
+          if [ "${#rock_files[@]}" -eq 0 ]; then
+            echo "No .rock files found" >&2
             exit 1
           fi
 
-          rockcraft.skopeo --insecure-policy copy \
-            "oci-archive:${rock_files[0]}" \
-            "docker://${IMAGE_URL}"
-
-          echo "> Rock image pushed to $IMAGE_URL" >> "$GITHUB_STEP_SUMMARY"
+          for rock in "${rock_files[@]}"; do
+            # Rock filename: <name>_<version>_<arch>.rock
+            arch="${rock##*_}"
+            arch="${arch%.rock}"
+            tag="${IMAGE_URL}-${arch}"
+            echo "Pushing ${rock} → ${tag}"
+            rockcraft.skopeo --insecure-policy copy \
+              "oci-archive:${rock}" \
+              "docker://${tag}"
+            echo "- \`${tag}\`" >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: Upload rock artifact
         id: upload-rock
@@ -195,16 +201,22 @@ jobs:
           shopt -s nullglob
           rock_files=(*.rock)
 
-          if [ "${#rock_files[@]}" -ne 1 ]; then
-            echo "Expected exactly one .rock file, found ${#rock_files[@]}" >&2
+          if [ "${#rock_files[@]}" -eq 0 ]; then
+            echo "No .rock files found" >&2
             exit 1
           fi
 
-          rockcraft.skopeo --insecure-policy copy \
-            "oci-archive:${rock_files[0]}" \
-            "docker://${IMAGE_URL}"
-
-          echo "> Rock image pushed to $IMAGE_URL" >> "$GITHUB_STEP_SUMMARY"
+          for rock in "${rock_files[@]}"; do
+            # Rock filename: <name>_<version>_<arch>.rock
+            arch="${rock##*_}"
+            arch="${arch%.rock}"
+            tag="${IMAGE_URL}-${arch}"
+            echo "Pushing ${rock} → ${tag}"
+            rockcraft.skopeo --insecure-policy copy \
+              "oci-archive:${rock}" \
+              "docker://${tag}"
+            echo "- \`${tag}\`" >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: Upload rock artifact
         id: upload-rock
