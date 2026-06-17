@@ -34,19 +34,40 @@ on:
     outputs:
       cache_hit:
         description: Whether the charm cache was hit
-        value: ${{ jobs.handle-charm-remote.outputs.cache_hit || jobs.handle-charm-local.outputs.cache_hit }}
+        value: ${{ jobs.check-charm-cache.outputs.cache-hit == 'true' }}
 
 permissions:
   contents: read
 
 jobs:
+  # Fast cache check on a GitHub-hosted runner.
+  # Skips dispatching to a self-hosted runner or Launchpad when cached.
+  # Checkout is needed because the cache key uses hashFiles.
+  check-charm-cache:
+    runs-on: ubuntu-latest
+    outputs:
+      cache-hit: ${{ steps.charm-cache.outputs.cache-hit }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ inputs.commit_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Check charm cache
+        id: charm-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ inputs.charm_path }}/*.charm
+          key: charm-${{ hashFiles(format('{0}/**', inputs.charm_path)) }}
+          lookup-only: true
+
   # Use Launchpad remote build when requested.
   # The calling job must pass secrets: inherit and have
   # LAUNCHPAD_CREDENTIALS configured.
   handle-charm-remote:
-    if: ${{ inputs.use_launchpad_remote_build }}
-    outputs:
-      cache_hit: ${{ steps.charm-cache.outputs.cache-hit }}
+    needs: check-charm-cache
+    if: needs.check-charm-cache.outputs.cache-hit != 'true' && inputs.use_launchpad_remote_build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -55,21 +76,12 @@ jobs:
           ref: ${{ inputs.commit_sha || github.sha }}
           persist-credentials: false
 
-      - name: Cache charm
-        id: charm-cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ${{ inputs.charm_path }}/*.charm
-          key: charm-${{ hashFiles(format('{0}/**', inputs.charm_path)) }}
-
       - name: Install charmcraft
-        if: steps.charm-cache.outputs.cache-hit != 'true'
         env:
           CHARMCRAFT_CHANNEL: ${{ inputs.charmcraft_channel }}
         run: sudo snap install --classic charmcraft --channel="$CHARMCRAFT_CHANNEL"
 
       - name: Write Launchpad credentials
-        if: steps.charm-cache.outputs.cache-hit != 'true'
         env:
           LAUNCHPAD_CREDENTIALS: ${{ secrets.LAUNCHPAD_CREDENTIALS }}
         run: |
@@ -78,7 +90,6 @@ jobs:
           chmod 600 ~/.local/share/charmcraft/launchpad-credentials
 
       - name: Build charm on Launchpad
-        if: steps.charm-cache.outputs.cache-hit != 'true'
         env:
           CHARM_PATH: ${{ inputs.charm_path }}
         shell: bash
@@ -92,7 +103,7 @@ jobs:
           exit "$status"
 
       - name: Show Launchpad build logs
-        if: always() && steps.charm-cache.outputs.cache-hit != 'true'
+        if: always()
         shell: bash
         run: |
           shopt -s nullglob
@@ -111,17 +122,21 @@ jobs:
           done
 
       - name: Upload charm artifact
-        if: steps.charm-cache.outputs.cache-hit != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: charm
           path: ${{ inputs.charm_path }}/*.charm
 
+      - name: Save charm to cache
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ inputs.charm_path }}/*.charm
+          key: charm-${{ hashFiles(format('{0}/**', inputs.charm_path)) }}
+
   # Local build (self-hosted runner, snap-installed charmcraft).
   handle-charm-local:
-    if: ${{ !inputs.use_launchpad_remote_build }}
-    outputs:
-      cache_hit: ${{ steps.charm-cache.outputs.cache-hit }}
+    needs: check-charm-cache
+    if: needs.check-charm-cache.outputs.cache-hit != 'true' && !inputs.use_launchpad_remote_build
     runs-on: self-hosted-linux-${{ inputs.runner_arch }}-${{ inputs.runner_base }}-${{ inputs.runner_flavor }}
     steps:
       - name: Checkout
@@ -130,25 +145,15 @@ jobs:
           ref: ${{ inputs.commit_sha || github.sha }}
           persist-credentials: false
 
-      - name: Cache charm
-        id: charm-cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ${{ inputs.charm_path }}/*.charm
-          key: charm-${{ hashFiles(format('{0}/**', inputs.charm_path)) }}
-
       - name: Setup LXD
-        if: steps.charm-cache.outputs.cache-hit != 'true'
         uses: canonical/setup-lxd@da2ac84e727dc534215fd14cd088b9209d65893b # v1.0.0
 
       - name: Install charmcraft
-        if: steps.charm-cache.outputs.cache-hit != 'true'
         env:
           CHARMCRAFT_CHANNEL: ${{ inputs.charmcraft_channel }}
         run: sudo snap install --classic charmcraft --channel="$CHARMCRAFT_CHANNEL"
 
       - name: Pack charm
-        if: steps.charm-cache.outputs.cache-hit != 'true'
         env:
           CHARM_PATH: ${{ inputs.charm_path }}
         run: |
@@ -156,8 +161,13 @@ jobs:
           charmcraft pack -v
 
       - name: Upload charm artifact
-        if: steps.charm-cache.outputs.cache-hit != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: charm
           path: ${{ inputs.charm_path }}/*.charm
+
+      - name: Save charm to cache
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ inputs.charm_path }}/*.charm
+          key: charm-${{ hashFiles(format('{0}/**', inputs.charm_path)) }}

@@ -9,10 +9,12 @@ SHA (shown as `@<ref>` below).
 
 ### `build-charm.yaml` - Build charm
 
-Packs a Juju charm with [charmcraft](https://juju.is/docs/sdk/charmcraft),
-using `actions/cache` to skip rebuilds when the charm source hasn't changed.
-By default it builds on a self-hosted runner; set `use_launchpad_remote_build: true` to
-offload the build to Launchpad's remote build farm instead.
+Packs a Juju charm with [charmcraft](https://juju.is/docs/sdk/charmcraft).
+A fast cache-check job on `ubuntu-latest` skips the build entirely when the
+charm source hasn't changed — no self-hosted runner or Launchpad contact
+needed. By default it builds on a self-hosted runner; set
+`use_launchpad_remote_build: true` to offload the build to Launchpad's remote
+build farm instead.
 
 **Inputs**
 
@@ -54,11 +56,12 @@ jobs:
 ### `build-rock.yaml` - Build and push rock image
 
 Builds a rock image with [rockcraft](https://canonical-rockcraft.readthedocs-hosted.com/).
-By default it builds on a self-hosted runner; set `use_launchpad_remote_build: true` to
-offload the build to Launchpad's remote build farm instead.
-Caches the `.rock` file by commit SHA, pushes it to
-`ghcr.io/<calling-repo>:<commit_sha>`, and uploads the `.rock` file as a
-workflow artifact.
+A fast cache-check job on `ubuntu-latest` skips the build entirely when the
+rock for this commit SHA is already cached — no self-hosted runner or
+Launchpad contact needed. By default it builds on a self-hosted runner; set
+`use_launchpad_remote_build: true` to offload the build to Launchpad's remote
+build farm instead. Pushes to `ghcr.io/<calling-repo>:<commit_sha>` and
+uploads the `.rock` file as a workflow artifact.
 
 **Inputs**
 

@@ -24,29 +24,46 @@ on:
         default: large
     outputs:
       rock_artifact_id:
-        description: ID of the uploaded rock artifact
+        description: ID of the uploaded rock artifact (empty on cache hit)
         value: ${{ jobs.handle-rock-remote.outputs.rock_artifact_id || jobs.handle-rock-local.outputs.rock_artifact_id }}
       rock_artifact_url:
-        description: URL of the uploaded rock artifact
+        description: URL of the uploaded rock artifact (empty on cache hit)
         value: ${{ jobs.handle-rock-remote.outputs.rock_artifact_url || jobs.handle-rock-local.outputs.rock_artifact_url }}
       cache_hit:
         description: Whether the rock cache was hit
-        value: ${{ jobs.handle-rock-remote.outputs.cache_hit || jobs.handle-rock-local.outputs.cache_hit }}
+        value: ${{ jobs.check-rock-cache.outputs.cache-hit == 'true' }}
 
 permissions:
   contents: read
   packages: write
 
 jobs:
+  # Fast cache check on a GitHub-hosted runner.
+  # Skips dispatching to a self-hosted runner or Launchpad when cached.
+  check-rock-cache:
+    runs-on: ubuntu-latest
+    outputs:
+      cache-hit: ${{ steps.rock-cache.outputs.cache-hit }}
+    env:
+      COMMIT_SHA: ${{ inputs.commit_sha || github.sha }}
+    steps:
+      - name: Check rock cache
+        id: rock-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: "*.rock"
+          key: rock-${{ env.COMMIT_SHA }}
+          lookup-only: true
+
   # Use Launchpad remote build when requested.
   # The calling job must pass secrets: inherit and have
   # LAUNCHPAD_CREDENTIALS configured.
   handle-rock-remote:
-    if: ${{ inputs.use_launchpad_remote_build }}
+    needs: check-rock-cache
+    if: needs.check-rock-cache.outputs.cache-hit != 'true' && inputs.use_launchpad_remote_build
     outputs:
       rock_artifact_id: ${{ steps.upload-rock.outputs.artifact-id }}
       rock_artifact_url: ${{ steps.upload-rock.outputs.artifact-url }}
-      cache_hit: ${{ steps.rock-cache.outputs.cache-hit }}
     runs-on: ubuntu-latest
     env:
       COMMIT_SHA: ${{ inputs.commit_sha || github.sha }}
@@ -59,18 +76,10 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Cache rock
-        id: rock-cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: "*.rock"
-          key: rock-${{ env.COMMIT_SHA }}
-
       - name: Install rockcraft
         run: sudo snap install --classic rockcraft
 
       - name: Write Launchpad credentials
-        if: steps.rock-cache.outputs.cache-hit != 'true'
         env:
           LAUNCHPAD_CREDENTIALS: ${{ secrets.LAUNCHPAD_CREDENTIALS }}
         run: |
@@ -79,7 +88,6 @@ jobs:
           chmod 600 ~/.local/share/rockcraft/launchpad-credentials
 
       - name: Build rock on Launchpad
-        if: steps.rock-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           echo "::group::rockcraft remote-build"
@@ -90,7 +98,7 @@ jobs:
           exit "$status"
 
       - name: Show Launchpad build logs
-        if: always() && steps.rock-cache.outputs.cache-hit != 'true'
+        if: always()
         shell: bash
         run: |
           shopt -s nullglob
@@ -139,13 +147,19 @@ jobs:
           path: "*.rock"
           if-no-files-found: error
 
+      - name: Save rock to cache
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: "*.rock"
+          key: rock-${{ env.COMMIT_SHA }}
+
   # Local build (self-hosted runner, snap-installed rockcraft).
   handle-rock-local:
-    if: ${{ !inputs.use_launchpad_remote_build }}
+    needs: check-rock-cache
+    if: needs.check-rock-cache.outputs.cache-hit != 'true' && !inputs.use_launchpad_remote_build
     outputs:
       rock_artifact_id: ${{ steps.upload-rock.outputs.artifact-id }}
       rock_artifact_url: ${{ steps.upload-rock.outputs.artifact-url }}
-      cache_hit: ${{ steps.rock-cache.outputs.cache-hit }}
     runs-on: self-hosted-linux-${{ inputs.runner_arch }}-${{ inputs.runner_base }}-${{ inputs.runner_flavor }}
     env:
       COMMIT_SHA: ${{ inputs.commit_sha || github.sha }}
@@ -157,30 +171,19 @@ jobs:
           ref: ${{ env.COMMIT_SHA }}
           persist-credentials: false
 
-      - name: Cache rock
-        id: rock-cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: "*.rock"
-          key: rock-${{ env.COMMIT_SHA }}
-
       - name: Setup LXD
-        if: steps.rock-cache.outputs.cache-hit != 'true'
         uses: canonical/setup-lxd@da2ac84e727dc534215fd14cd088b9209d65893b # v1.0.0
 
       - name: Install rockcraft
-        if: steps.rock-cache.outputs.cache-hit != 'true'
         run: sudo snap install --classic rockcraft
 
       - name: Pack rock
-        if: steps.rock-cache.outputs.cache-hit != 'true'
         env:
           ROCKCRAFT_ENABLE_EXPERIMENTAL_EXTENSIONS: "true"
         run: |
           rockcraft pack -v
 
       - name: Log in to ghcr.io
-        if: steps.rock-cache.outputs.cache-hit != 'true'
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: ghcr.io
@@ -188,7 +191,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push rock to ghcr.io
-        if: steps.rock-cache.outputs.cache-hit != 'true'
         run: |
           shopt -s nullglob
           rock_files=(*.rock)
@@ -211,3 +213,9 @@ jobs:
           name: rocks-${{ env.COMMIT_SHA }}
           path: "*.rock"
           if-no-files-found: error
+
+      - name: Save rock to cache
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: "*.rock"
+          key: rock-${{ env.COMMIT_SHA }}
