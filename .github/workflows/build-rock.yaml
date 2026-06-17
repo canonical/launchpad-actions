@@ -1,0 +1,233 @@
+name: Rock
+on:
+  workflow_call:
+    inputs:
+      commit_sha:
+        description: Commit SHA to checkout and tag the GHCR image
+        type: string
+        required: false
+      use_launchpad_remote_build:
+        description: Build on Launchpad remote builders instead of a self-hosted runner
+        type: boolean
+        default: false
+      runner_arch:
+        description: Runner architecture (amd64, arm64, ppc64el, s390x)
+        type: string
+        default: amd64
+      runner_base:
+        description: Runner base image (focal, jammy, noble)
+        type: string
+        default: noble
+      runner_flavor:
+        description: Runner flavor (small, medium, large, large-extra, xlarge, xlarge-extra)
+        type: string
+        default: large
+    outputs:
+      rock_artifact_id:
+        description: ID of the uploaded rock artifact (empty on cache hit)
+        value: ${{ jobs.handle-rock-remote.outputs.rock_artifact_id || jobs.handle-rock-local.outputs.rock_artifact_id }}
+      rock_artifact_url:
+        description: URL of the uploaded rock artifact (empty on cache hit)
+        value: ${{ jobs.handle-rock-remote.outputs.rock_artifact_url || jobs.handle-rock-local.outputs.rock_artifact_url }}
+      cache_hit:
+        description: Whether the rock cache was hit
+        value: ${{ jobs.check-rock-cache.outputs.cache-hit == 'true' }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Fast cache check on a GitHub-hosted runner.
+  # Skips dispatching to a self-hosted runner or Launchpad when cached.
+  check-rock-cache:
+    runs-on: ubuntu-latest
+    outputs:
+      cache-hit: ${{ steps.rock-cache.outputs.cache-hit }}
+    env:
+      COMMIT_SHA: ${{ inputs.commit_sha || github.sha }}
+    steps:
+      - name: Check rock cache
+        id: rock-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: "*.rock"
+          key: rock-${{ env.COMMIT_SHA }}
+          lookup-only: true
+
+  # Use Launchpad remote build when requested.
+  # The calling job must pass secrets: inherit and have
+  # LAUNCHPAD_CREDENTIALS configured.
+  handle-rock-remote:
+    needs: check-rock-cache
+    if: needs.check-rock-cache.outputs.cache-hit != 'true' && inputs.use_launchpad_remote_build
+    outputs:
+      rock_artifact_id: ${{ steps.upload-rock.outputs.artifact-id }}
+      rock_artifact_url: ${{ steps.upload-rock.outputs.artifact-url }}
+    runs-on: ubuntu-latest
+    env:
+      COMMIT_SHA: ${{ inputs.commit_sha || github.sha }}
+      IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha || github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install rockcraft
+        run: sudo snap install --classic rockcraft
+
+      - name: Write Launchpad credentials
+        env:
+          LAUNCHPAD_CREDENTIALS: ${{ secrets.LAUNCHPAD_CREDENTIALS }}
+        run: |
+          mkdir -p ~/.local/share/rockcraft
+          printf '%s' "$LAUNCHPAD_CREDENTIALS" > ~/.local/share/rockcraft/launchpad-credentials
+          chmod 600 ~/.local/share/rockcraft/launchpad-credentials
+
+      - name: Build rock on Launchpad
+        shell: bash
+        run: |
+          echo "::group::rockcraft remote-build"
+          rockcraft remote-build \
+            --launchpad-accept-public-upload \
+            --launchpad-timeout=7200 && status=0 || status=$?
+          echo "::endgroup::"
+          exit "$status"
+
+      - name: Show Launchpad build logs
+        if: always()
+        shell: bash
+        run: |
+          shopt -s nullglob
+
+          launchpad_logs=(rockcraft-*.txt)
+          if [ "${#launchpad_logs[@]}" -eq 0 ]; then
+            echo "::warning::No Launchpad build log files were written"
+            exit 0
+          fi
+
+          for log_file in "${launchpad_logs[@]}"; do
+            echo "::group::Launchpad build log (${log_file})"
+            # Prefix each line so log content cannot trigger workflow commands
+            sed 's/^/  /' -- "$log_file"
+            echo "::endgroup::"
+          done
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push rocks to ghcr.io
+        run: |
+          shopt -s nullglob
+          rock_files=(*.rock)
+
+          if [ "${#rock_files[@]}" -eq 0 ]; then
+            echo "No .rock files found" >&2
+            exit 1
+          fi
+
+          for rock in "${rock_files[@]}"; do
+            # Rock filename: <name>_<version>_<arch>.rock
+            arch="${rock##*_}"
+            arch="${arch%.rock}"
+            tag="${IMAGE_URL}-${arch}"
+            echo "Pushing ${rock} → ${tag}"
+            rockcraft.skopeo --insecure-policy copy \
+              "oci-archive:${rock}" \
+              "docker://${tag}"
+            echo "- \`${tag}\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Upload rock artifact
+        id: upload-rock
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rocks-${{ env.COMMIT_SHA }}
+          path: "*.rock"
+          if-no-files-found: error
+
+      - name: Save rock to cache
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: "*.rock"
+          key: rock-${{ env.COMMIT_SHA }}
+
+  # Local build (self-hosted runner, snap-installed rockcraft).
+  handle-rock-local:
+    needs: check-rock-cache
+    if: needs.check-rock-cache.outputs.cache-hit != 'true' && !inputs.use_launchpad_remote_build
+    outputs:
+      rock_artifact_id: ${{ steps.upload-rock.outputs.artifact-id }}
+      rock_artifact_url: ${{ steps.upload-rock.outputs.artifact-url }}
+    runs-on: self-hosted-linux-${{ inputs.runner_arch }}-${{ inputs.runner_base }}-${{ inputs.runner_flavor }}
+    env:
+      COMMIT_SHA: ${{ inputs.commit_sha || github.sha }}
+      IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha || github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+          persist-credentials: false
+
+      - name: Setup LXD
+        uses: canonical/setup-lxd@da2ac84e727dc534215fd14cd088b9209d65893b # v1.0.0
+
+      - name: Install rockcraft
+        run: sudo snap install --classic rockcraft
+
+      - name: Pack rock
+        env:
+          ROCKCRAFT_ENABLE_EXPERIMENTAL_EXTENSIONS: "true"
+        run: |
+          rockcraft pack -v
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push rock to ghcr.io
+        run: |
+          shopt -s nullglob
+          rock_files=(*.rock)
+
+          if [ "${#rock_files[@]}" -eq 0 ]; then
+            echo "No .rock files found" >&2
+            exit 1
+          fi
+
+          for rock in "${rock_files[@]}"; do
+            # Rock filename: <name>_<version>_<arch>.rock
+            arch="${rock##*_}"
+            arch="${arch%.rock}"
+            tag="${IMAGE_URL}-${arch}"
+            echo "Pushing ${rock} → ${tag}"
+            rockcraft.skopeo --insecure-policy copy \
+              "oci-archive:${rock}" \
+              "docker://${tag}"
+            echo "- \`${tag}\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Upload rock artifact
+        id: upload-rock
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rocks-${{ env.COMMIT_SHA }}
+          path: "*.rock"
+          if-no-files-found: error
+
+      - name: Save rock to cache
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: "*.rock"
+          key: rock-${{ env.COMMIT_SHA }}
