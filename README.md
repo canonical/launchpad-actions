@@ -11,6 +11,8 @@ SHA (shown as `@<ref>` below).
 
 Packs a Juju charm with [charmcraft](https://juju.is/docs/sdk/charmcraft),
 using `actions/cache` to skip rebuilds when the charm source hasn't changed.
+By default it builds on a self-hosted runner; set `use_launchpad: true` to
+offload the build to Launchpad's remote build farm instead.
 
 **Inputs**
 
@@ -19,6 +21,7 @@ using `actions/cache` to skip rebuilds when the charm source hasn't changed.
 | `commit_sha` | No | `github.sha` | Commit SHA to check out |
 | `charm_path` | No | `charm` | Path to the charm directory |
 | `charmcraft_channel` | No | `3.x/stable` | Charmcraft snap channel to install |
+| `use_launchpad` | No | `false` | Build on Launchpad remote builders instead of a self-hosted runner |
 | `runner_arch` | No | `amd64` | Runner architecture: `amd64`, `arm64`, `ppc64el`, `s390x` |
 | `runner_base` | No | `noble` | Runner base image: `focal`, `jammy`, `noble` |
 | `runner_flavor` | No | `large` | Runner flavor: `small`, `medium`, `large`, `large-extra`, `xlarge`, `xlarge-extra` |
@@ -28,6 +31,10 @@ using `actions/cache` to skip rebuilds when the charm source hasn't changed.
 | Name | Description |
 |------|-------------|
 | `cache_hit` | `true` if the packed charm was served from cache |
+
+**Secrets required (when `use_launchpad: true`):** `LAUNCHPAD_CREDENTIALS` —
+the full contents of `~/.local/share/charmcraft/launchpad-credentials`;
+pass `secrets: inherit` from the calling job.
 
 **Usage**
 
@@ -39,26 +46,26 @@ jobs:
     with:
       commit_sha: ${{ github.sha }}
       charm_path: "."
+      use_launchpad: true
 ```
 
 ---
 
-### `remote-build-rock.yaml` - Build and push rock image
+### `build-rock.yaml` - Build and push rock image
 
-Builds a rock image with [rockcraft](https://canonical-rockcraft.readthedocs-hosted.com/)
-using [remote build](https://documentation.ubuntu.com/craft-application/latest/how-to/build-remotely/),
-which offloads the build to Launchpad's build farm instead of the GitHub
-runner. The project source is uploaded publicly to Launchpad
-(`--launchpad-accept-public-upload`). Caches the `.rock` file by commit SHA,
-pushes it to `ghcr.io/<calling-repo>:<commit_sha>`, and uploads the `.rock`
-file as a workflow artifact. Launchpad build logs are printed in the job
-output on cache misses.
+Builds a rock image with [rockcraft](https://canonical-rockcraft.readthedocs-hosted.com/).
+By default it builds on a self-hosted runner; set `use_launchpad: true` to
+offload the build to Launchpad's remote build farm instead.
+Caches the `.rock` file by commit SHA, pushes it to
+`ghcr.io/<calling-repo>:<commit_sha>`, and uploads the `.rock` file as a
+workflow artifact.
 
 **Inputs**
 
 | Name | Required | Default | Description |
 |------|----------|---------|-------------|
 | `commit_sha` | No | `github.sha` | Commit SHA to check out and use as the image tag |
+| `use_launchpad` | No | `false` | Build on Launchpad remote builders instead of a self-hosted runner |
 
 **Outputs**
 
@@ -68,9 +75,9 @@ output on cache misses.
 | `rock_artifact_url` | URL of the uploaded rock artifact |
 | `cache_hit` | `true` if the rock was served from cache |
 
-**Secrets required:** `ROCKCRAFT_LAUNCHPAD_CREDENTIALS` — the full contents of
-`~/.local/share/rockcraft/launchpad-credentials`; pass `secrets: inherit` from
-the calling job.
+**Secrets required (when `use_launchpad: true`):** `LAUNCHPAD_CREDENTIALS` —
+the full contents of `~/.local/share/rockcraft/launchpad-credentials`;
+pass `secrets: inherit` from the calling job.
 
 **Permissions required:** `contents: read`, `packages: write`
 
@@ -82,10 +89,11 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: canonical/launchpad-actions/.github/workflows/remote-build-rock.yaml@<ref>
+    uses: canonical/launchpad-actions/.github/workflows/build-rock.yaml@<ref>
     secrets: inherit
     with:
       commit_sha: ${{ github.sha }}
+      use_launchpad: true
 ```
 
 ---
@@ -139,7 +147,7 @@ jobs:
 
 **Full pipeline: publish a charm and its rock to Charmhub**
 
-Combines `remote-build-rock.yaml`, `build-charm.yaml`, and `release-charm.yaml` into
+Combines `build-rock.yaml`, `build-charm.yaml`, and `release-charm.yaml` into
 a single publish workflow. Pushes to `main` auto-publish on the `edge`
 channel; `workflow_dispatch` allows picking the channel manually.
 
@@ -148,7 +156,7 @@ name: Publish
 # Orchestrates rock build, charm pack, and Charmhub release.
 #
 # Required secrets:
-#   ROCKCRAFT_LAUNCHPAD_CREDENTIALS — contents of
+#   LAUNCHPAD_CREDENTIALS — contents of
 #     ~/.local/share/rockcraft/launchpad-credentials
 #   CHARMHUB_TOKEN — charmcraft credentials (`charmcraft login --export`)
 
@@ -178,7 +186,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: canonical/launchpad-actions/.github/workflows/remote-build-rock.yaml@<ref>
+    uses: canonical/launchpad-actions/.github/workflows/build-rock.yaml@<ref>
     secrets: inherit
     with:
       commit_sha: ${{ github.sha }}

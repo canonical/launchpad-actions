@@ -15,6 +15,10 @@ on:
         description: Charmcraft snap channel to install
         type: string
         default: 3.x/stable
+      use_launchpad:
+        description: Build on Launchpad remote builders instead of a self-hosted runner
+        type: boolean
+        default: false
       runner_arch:
         description: Runner architecture (amd64, arm64, ppc64el, s390x)
         type: string
@@ -30,13 +34,92 @@ on:
     outputs:
       cache_hit:
         description: Whether the charm cache was hit
-        value: ${{ jobs.handle-charm.outputs.cache_hit }}
+        value: ${{ jobs.handle-charm-remote.outputs.cache_hit || jobs.handle-charm-local.outputs.cache_hit }}
 
 permissions:
   contents: read
 
 jobs:
-  handle-charm:
+  # Use Launchpad remote build when requested.
+  # The calling job must pass secrets: inherit and have
+  # LAUNCHPAD_CREDENTIALS configured.
+  handle-charm-remote:
+    if: ${{ inputs.use_launchpad }}
+    outputs:
+      cache_hit: ${{ steps.charm-cache.outputs.cache-hit }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ inputs.commit_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Cache charm
+        id: charm-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ inputs.charm_path }}/*.charm
+          key: charm-${{ hashFiles(format('{0}/**', inputs.charm_path)) }}
+
+      - name: Install charmcraft
+        if: steps.charm-cache.outputs.cache-hit != 'true'
+        env:
+          CHARMCRAFT_CHANNEL: ${{ inputs.charmcraft_channel }}
+        run: sudo snap install --classic charmcraft --channel="$CHARMCRAFT_CHANNEL"
+
+      - name: Write Launchpad credentials
+        if: steps.charm-cache.outputs.cache-hit != 'true'
+        env:
+          LAUNCHPAD_CREDENTIALS: ${{ secrets.LAUNCHPAD_CREDENTIALS }}
+        run: |
+          mkdir -p ~/.local/share/charmcraft
+          printf '%s' "$LAUNCHPAD_CREDENTIALS" > ~/.local/share/charmcraft/launchpad-credentials
+          chmod 600 ~/.local/share/charmcraft/launchpad-credentials
+
+      - name: Build charm on Launchpad
+        if: steps.charm-cache.outputs.cache-hit != 'true'
+        env:
+          CHARM_PATH: ${{ inputs.charm_path }}
+        shell: bash
+        run: |
+          echo "::group::charmcraft remote-build"
+          cd "$CHARM_PATH"
+          charmcraft remote-build \
+            --launchpad-accept-public-upload \
+            --launchpad-timeout=7200 && status=0 || status=$?
+          echo "::endgroup::"
+          exit "$status"
+
+      - name: Show Launchpad build logs
+        if: always() && steps.charm-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          shopt -s nullglob
+
+          launchpad_logs=(charmcraft-*.txt)
+          if [ "${#launchpad_logs[@]}" -eq 0 ]; then
+            echo "::warning::No Launchpad build log files were written"
+            exit 0
+          fi
+
+          for log_file in "${launchpad_logs[@]}"; do
+            echo "::group::Launchpad build log (${log_file})"
+            # Prefix each line so log content cannot trigger workflow commands
+            sed 's/^/  /' -- "$log_file"
+            echo "::endgroup::"
+          done
+
+      - name: Upload charm artifact
+        if: steps.charm-cache.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: charm
+          path: ${{ inputs.charm_path }}/*.charm
+
+  # Local build (self-hosted runner, snap-installed charmcraft).
+  handle-charm-local:
+    if: ${{ !inputs.use_launchpad }}
     outputs:
       cache_hit: ${{ steps.charm-cache.outputs.cache-hit }}
     runs-on: self-hosted-linux-${{ inputs.runner_arch }}-${{ inputs.runner_base }}-${{ inputs.runner_flavor }}
