@@ -1,0 +1,8 @@
+[project]
+name = "terraform-bump-pr"
+version = "0.0.0"
+description = "Bump charm/resource revisions in a Terraform configuration."
+requires-python = ">=3.9"
+dependencies = [
+    "python-hcl2~=8.1",
+]

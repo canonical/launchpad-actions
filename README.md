@@ -401,3 +401,50 @@ jobs:
       trigger_workflow: pipeline.yaml
       trigger_ref: main
 ```
+```
+
+---
+
+### `terraform-bump-pr.yaml` - Terraform revision bump
+
+Bumps the charm revision and OCI app-image resource revision of a Juju application inside a target Terraform repository by opening (or replacing) a Pull Request against the base branch.
+
+A Python helper parses and updates the `main.tf` (or equivalent file) securely. A previous open bump PR is closed and superseded by the new one.
+
+**Inputs**
+
+| Name | Required | Default | Description |
+|------|----------|---------|-------------|
+| `environment` | No | `prod` | Terraform target environment, e.g. `prod` or `stg` |
+| `app_name` | No | `app` | Name of the `juju_application` resource in the Terraform configuration |
+| `charm_revision` | Yes | - | Charm revision number |
+| `resource_revision` | Yes | - | Resource revision number for `app-image` |
+| `tf_file_path` | No | `main.tf` | Path to the Terraform file (relative to target repo root) |
+| `tf_base_branch` | No | `main` | Base branch of the target Terraform repository |
+
+**Secrets required:**
+
+* `TERRAFORM_PR_TOKEN`: A GitHub Personal Access Token (PAT) with repository write permissions to the target repo so the Action can push commits/branches and open/close PRs. Pass `secrets: inherit` from the calling job.
+
+**Variables configured in the calling workspace:**
+
+* `vars.TERRAFORM_TARGET_REPO_PROD`: Target GitHub repository for the `prod` environment (e.g. `owner/repo-prod`)
+* `vars.TERRAFORM_TARGET_REPO_STG`: Target GitHub repository for the `stg` environment (e.g. `owner/repo-stg`)
+
+**Usage**
+
+```yaml
+jobs:
+  terraform-pr:
+    permissions:
+      contents: read
+    uses: canonical/launchpad-actions/.github/workflows/terraform-bump-pr.yaml@<ref>
+    secrets: inherit
+    with:
+      environment: prod
+      app_name: "my-app"
+      charm_revision: "42"
+      resource_revision: "17"
+```
+
+
