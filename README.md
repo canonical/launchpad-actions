@@ -407,9 +407,9 @@ jobs:
 
 ### `terraform-bump-pr.yaml` - Terraform revision bump
 
-Bumps the charm revision and OCI app-image resource revision of a Juju application inside a target Terraform repository. Either opens (or replaces) a Pull Request, or commits straight to the base branch — selectable via `mode`.
+Bumps the charm revision and OCI app-image resource revision of a Juju application inside a target Terraform repository by opening (or replacing) a Pull Request against the base branch.
 
-A Python helper parses and updates the `main.tf` (or equivalent file) securely. In `pr` mode (default), a previous open bump PR is closed and superseded by the new one.
+A Python helper parses and updates the `main.tf` (or equivalent file) securely. A previous open bump PR is closed and superseded by the new one.
 
 **Inputs**
 
@@ -421,11 +421,10 @@ A Python helper parses and updates the `main.tf` (or equivalent file) securely. 
 | `resource_revision` | Yes | - | Resource revision number for `app-image` |
 | `tf_file_path` | No | `main.tf` | Path to the Terraform file (relative to target repo root) |
 | `tf_base_branch` | No | `main` | Base branch of the target Terraform repository |
-| `mode` | No | `pr` | How to land the bump: `pr` (open/replace a PR) or `direct` (commit straight to `tf_base_branch`) |
 
 **Secrets required:**
 
-* `TERRAFORM_PR_TOKEN`: A GitHub Personal Access Token (PAT) with repository write permissions to the target repo so the Action can push commits/branches and (in `pr` mode) open/close PRs. Pass `secrets: inherit` from the calling job. In `direct` mode the target branch must permit pushes from this token (no required reviews / branch protection bypass).
+* `TERRAFORM_PR_TOKEN`: A GitHub Personal Access Token (PAT) with repository write permissions to the target repo so the Action can push commits/branches and open/close PRs. Pass `secrets: inherit` from the calling job.
 
 **Variables configured in the calling workspace:**
 

@@ -1,8 +1,7 @@
 name: Terraform bump
 description: >-
   Validate inputs, bump the charm/resource revisions of a Juju application in
-  a target Terraform repository, and either open a Pull Request or commit
-  directly to the base branch.
+  a target Terraform repository, and open a Pull Request with the change.
 
 inputs:
   tf_repo:
@@ -26,10 +25,6 @@ inputs:
   tf_base_branch:
     description: Base branch of the target Terraform repository.
     required: true
-  mode:
-    description: 'pr (default) opens or replaces a PR against tf_base_branch; direct commits straight to tf_base_branch.'
-    required: false
-    default: pr
 
 runs:
   using: composite
@@ -45,7 +40,6 @@ runs:
         RESOURCE_REVISION: ${{ inputs.resource_revision }}
         TF_FILE_PATH: ${{ inputs.tf_file_path }}
         TF_BASE_BRANCH: ${{ inputs.tf_base_branch }}
-        MODE: ${{ inputs.mode }}
       run: bash "${GITHUB_ACTION_PATH}/validate_inputs.sh"
 
     - name: Checkout Terraform repo
@@ -83,5 +77,4 @@ runs:
         RESOURCE_REVISION: ${{ inputs.resource_revision }}
         TF_FILE_PATH: ${{ inputs.tf_file_path }}
         TF_BASE_BRANCH: ${{ inputs.tf_base_branch }}
-        MODE: ${{ inputs.mode }}
       run: bash "${GITHUB_ACTION_PATH}/commit_changes.sh"

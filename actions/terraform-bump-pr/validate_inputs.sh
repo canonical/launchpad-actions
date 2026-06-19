@@ -2,8 +2,7 @@
 # Validate the user-supplied inputs before they reach a branch name, commit
 # message, PR title or a juju resource selector.
 # Expects the following environment variables:
-#   APP_NAME, CHARM_REVISION, RESOURCE_REVISION, TF_FILE_PATH, TF_BASE_BRANCH,
-#   MODE
+#   APP_NAME, CHARM_REVISION, RESOURCE_REVISION, TF_FILE_PATH, TF_BASE_BRANCH
 set -euo pipefail
 
 # Reject anything that isn't a plain integer before it reaches a branch name,
@@ -30,10 +29,5 @@ fi
 # App name ends up in a juju resource selector and PR text.
 if ! [[ "${APP_NAME}" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "Invalid app_name: ${APP_NAME}" >&2
-  exit 2
-fi
-# MODE selects between PR and direct-commit flows.
-if [[ "${MODE}" != "pr" && "${MODE}" != "direct" ]]; then
-  echo "Invalid mode: ${MODE} (expected pr|direct)" >&2
   exit 2
 fi

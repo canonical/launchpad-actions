@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Commit the bumped Terraform file. Two modes:
-#   MODE=pr       - push to a unique branch, open a PR, close older bump PRs.
-#   MODE=direct   - commit straight to TF_BASE_BRANCH and push.
+# Push the bumped Terraform file to a unique branch, open a PR, and close
+# older bump PRs.
 #
 # Expects the Terraform checkout at ./terraform-repo and the following
 # environment variables:
 #   GH_TOKEN, TF_REPO, APP_NAME, CHARM_REVISION, RESOURCE_REVISION,
-#   TF_FILE_PATH, TF_BASE_BRANCH, MODE
+#   TF_FILE_PATH, TF_BASE_BRANCH
 set -euo pipefail
 cd terraform-repo
 
@@ -21,30 +20,13 @@ fi
 
 COMMIT_MSG="chore(${APP_NAME}): bump charm to rev ${CHARM_REVISION}, app-image to rev ${RESOURCE_REVISION}"
 
-case "${MODE}" in
-  pr)
-    BRANCH="bump-revision-app-${RESOURCE_REVISION}-charm-${CHARM_REVISION}-${GITHUB_RUN_ID}"
-    git switch -c "$BRANCH"
-    ;;
-  direct)
-    # Already on TF_BASE_BRANCH from the checkout step; commit lands there.
-    ;;
-  *)
-    echo "Invalid MODE: ${MODE} (expected pr|direct)" >&2
-    exit 2
-    ;;
-esac
+BRANCH="bump-revision-app-${RESOURCE_REVISION}-charm-${CHARM_REVISION}-${GITHUB_RUN_ID}"
+git switch -c "$BRANCH"
 
 git add -- "${TF_FILE_PATH}"
 git -c user.name="github-actions[bot]" \
     -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
     commit -m "${COMMIT_MSG}"
-
-if [[ "${MODE}" == "direct" ]]; then
-  git push origin "HEAD:${TF_BASE_BRANCH}"
-  echo "Pushed bump commit directly to ${TF_BASE_BRANCH}."
-  exit 0
-fi
 
 git push -u origin HEAD
 

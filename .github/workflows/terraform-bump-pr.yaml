@@ -34,14 +34,6 @@ on:
         type: string
         required: false
         default: main
-      mode:
-        description: 'pr: open (or replace) a PR against tf_base_branch. direct: commit straight to tf_base_branch.'
-        type: choice
-        required: false
-        default: pr
-        options:
-          - pr
-          - direct
   workflow_call:
     inputs:
       environment:
@@ -72,11 +64,6 @@ on:
         type: string
         required: false
         default: main
-      mode:
-        description: 'pr: open (or replace) a PR against tf_base_branch. direct: commit straight to tf_base_branch.'
-        type: string
-        required: false
-        default: pr
     secrets:
       TERRAFORM_PR_TOKEN:
         required: false
@@ -140,5 +127,4 @@ jobs:
           resource_revision: ${{ inputs.resource_revision }}
           tf_file_path: ${{ inputs.tf_file_path }}
           tf_base_branch: ${{ inputs.tf_base_branch }}
-          mode: ${{ inputs.mode }}
 
