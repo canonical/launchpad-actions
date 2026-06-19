@@ -31,6 +31,10 @@ on:
         description: Charmcraft snap channel to install
         type: string
         default: 3.x/stable
+      image_arch:
+        description: Architecture suffix of the OCI image tag to release (must match build-rock runner_arch)
+        type: string
+        default: amd64
     outputs:
       charm_revision:
         description: Charm revision released to Charmhub
@@ -40,7 +44,7 @@ on:
         value: ${{ jobs.release.outputs.resource_revision }}
 
 env:
-  IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha }}
+  IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha }}-${{ inputs.image_arch }}
 
 jobs:
   release:
