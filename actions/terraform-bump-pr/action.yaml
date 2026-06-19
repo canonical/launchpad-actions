@@ -1,0 +1,87 @@
+name: Terraform bump
+description: >-
+  Validate inputs, bump the charm/resource revisions of a Juju application in
+  a target Terraform repository, and either open a Pull Request or commit
+  directly to the base branch.
+
+inputs:
+  tf_repo:
+    description: Target Terraform repository (owner/repo).
+    required: true
+  tf_token:
+    description: Token with write access to the target Terraform repository.
+    required: true
+  app_name:
+    description: Name of the juju_application resource in the Terraform configuration.
+    required: true
+  charm_revision:
+    description: Charm revision.
+    required: true
+  resource_revision:
+    description: Resource revision for app-image.
+    required: true
+  tf_file_path:
+    description: Path to the Terraform file (relative to target repo root).
+    required: true
+  tf_base_branch:
+    description: Base branch of the target Terraform repository.
+    required: true
+  mode:
+    description: 'pr (default) opens or replaces a PR against tf_base_branch; direct commits straight to tf_base_branch.'
+    required: false
+    default: pr
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+    - name: Validate inputs
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+        CHARM_REVISION: ${{ inputs.charm_revision }}
+        RESOURCE_REVISION: ${{ inputs.resource_revision }}
+        TF_FILE_PATH: ${{ inputs.tf_file_path }}
+        TF_BASE_BRANCH: ${{ inputs.tf_base_branch }}
+        MODE: ${{ inputs.mode }}
+      run: bash "${GITHUB_ACTION_PATH}/validate_inputs.sh"
+
+    - name: Checkout Terraform repo
+      uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      with:
+        repository: ${{ inputs.tf_repo }}
+        token: ${{ inputs.tf_token }}
+        path: terraform-repo
+        ref: ${{ inputs.tf_base_branch }}
+        persist-credentials: false
+
+    - name: Bump revisions in Terraform
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+        CHARM_REVISION: ${{ inputs.charm_revision }}
+        RESOURCE_REVISION: ${{ inputs.resource_revision }}
+        TF_FILE_PATH: ${{ inputs.tf_file_path }}
+      run: |
+        set -euo pipefail
+        uv run --locked --project "${GITHUB_ACTION_PATH}" \
+          "${GITHUB_ACTION_PATH}/bump_revisions.py" \
+          --file "terraform-repo/${TF_FILE_PATH}" \
+          --app-name "${APP_NAME}" \
+          --charm-revision "${CHARM_REVISION}" \
+          --resource-revision "${RESOURCE_REVISION}"
+
+    - name: Commit changes (if any)
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.tf_token }}
+        TF_REPO: ${{ inputs.tf_repo }}
+        APP_NAME: ${{ inputs.app_name }}
+        CHARM_REVISION: ${{ inputs.charm_revision }}
+        RESOURCE_REVISION: ${{ inputs.resource_revision }}
+        TF_FILE_PATH: ${{ inputs.tf_file_path }}
+        TF_BASE_BRANCH: ${{ inputs.tf_base_branch }}
+        MODE: ${{ inputs.mode }}
+      run: bash "${GITHUB_ACTION_PATH}/commit_changes.sh"

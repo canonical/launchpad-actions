@@ -1,0 +1,144 @@
+name: Terraform bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which Terraform repo to bump
+        type: choice
+        required: false
+        default: prod
+        options:
+          - prod
+          - stg
+      app_name:
+        description: Name of the juju_application resource in the Terraform configuration
+        type: string
+        required: false
+        default: app
+      charm_revision:
+        description: Charm revision
+        type: string
+        required: true
+      resource_revision:
+        description: Resource revision for app-image
+        type: string
+        required: true
+      tf_file_path:
+        description: Path to the Terraform file (relative to target repo root)
+        type: string
+        required: false
+        default: main.tf
+      tf_base_branch:
+        description: Base branch of the target Terraform repo
+        type: string
+        required: false
+        default: main
+      mode:
+        description: 'pr: open (or replace) a PR against tf_base_branch. direct: commit straight to tf_base_branch.'
+        type: choice
+        required: false
+        default: pr
+        options:
+          - pr
+          - direct
+  workflow_call:
+    inputs:
+      environment:
+        description: Which Terraform repo to bump (prod|stg)
+        type: string
+        required: false
+        default: prod
+      app_name:
+        description: Name of the juju_application resource in the Terraform configuration
+        type: string
+        required: false
+        default: app
+      charm_revision:
+        description: Charm revision
+        type: string
+        required: true
+      resource_revision:
+        description: Resource revision for app-image
+        type: string
+        required: true
+      tf_file_path:
+        description: Path to the Terraform file (relative to target repo root)
+        type: string
+        required: false
+        default: main.tf
+      tf_base_branch:
+        description: Base branch of the target Terraform repo
+        type: string
+        required: false
+        default: main
+      mode:
+        description: 'pr: open (or replace) a PR against tf_base_branch. direct: commit straight to tf_base_branch.'
+        type: string
+        required: false
+        default: pr
+    secrets:
+      TERRAFORM_PR_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    name: Bump Terraform revisions
+    runs-on: ubuntu-latest
+    env:
+      TF_ENV: ${{ inputs.environment }}
+      TF_REPO_PROD: ${{ vars.TERRAFORM_TARGET_REPO_PROD }}
+      TF_REPO_STG: ${{ vars.TERRAFORM_TARGET_REPO_STG }}
+      TF_TOKEN: ${{ secrets.TERRAFORM_PR_TOKEN }}
+    steps:
+      - name: Resolve target Terraform repo
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${TF_ENV}" in
+            prod)
+              TF_REPO="${TF_REPO_PROD}"
+              ;;
+            stg)
+              TF_REPO="${TF_REPO_STG}"
+              ;;
+            *) echo "Invalid environment: ${TF_ENV} (expected prod|stg)" >&2; exit 2 ;;
+          esac
+          echo "tf_repo=${TF_REPO}" >> "${GITHUB_OUTPUT}"
+
+      - name: Skip if Terraform repo is not configured
+        if: ${{ steps.resolve.outputs.tf_repo == '' }}
+        shell: bash
+        run: echo "Terraform target repo not set for ${TF_ENV}; skipping."
+
+      - name: Skip if Terraform token is not configured
+        if: ${{ steps.resolve.outputs.tf_repo != '' && env.TF_TOKEN == '' }}
+        shell: bash
+        run: echo "TERRAFORM_PR_TOKEN not set; skipping."
+
+      - name: Checkout launchpad-actions
+        if: ${{ steps.resolve.outputs.tf_repo != '' && env.TF_TOKEN != '' }}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: canonical/launchpad-actions
+          ref: ${{ github.workflow_sha }}
+          path: launchpad-actions
+          persist-credentials: false
+
+      - name: Bump revisions
+        if: ${{ steps.resolve.outputs.tf_repo != '' && env.TF_TOKEN != '' }}
+        uses: ./launchpad-actions/actions/terraform-bump-pr
+        with:
+          tf_repo: ${{ steps.resolve.outputs.tf_repo }}
+          tf_token: ${{ env.TF_TOKEN }}
+          app_name: ${{ inputs.app_name }}
+          charm_revision: ${{ inputs.charm_revision }}
+          resource_revision: ${{ inputs.resource_revision }}
+          tf_file_path: ${{ inputs.tf_file_path }}
+          tf_base_branch: ${{ inputs.tf_base_branch }}
+          mode: ${{ inputs.mode }}
+
