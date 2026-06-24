@@ -454,7 +454,6 @@ jobs:
       trigger_workflow: pipeline.yaml
       trigger_ref: main
 ```
-```
 
 ---
 
