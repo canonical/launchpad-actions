@@ -43,7 +43,17 @@ jobs:
           ref: ${{ inputs.commit_sha }}
           persist-credentials: false
 
+      - name: Check for existing charm
+        id: check-charm
+        env:
+          CHARM_PATH: ${{ inputs.charm_path }}
+        run: |
+          shopt -s nullglob
+          charm_files=("${CHARM_PATH}"/*.charm)
+          [[ "${#charm_files[@]}" -gt 0 ]] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
+
       - name: Restore charm from cache
+        if: steps.check-charm.outputs.exists != 'true'
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ${{ inputs.charm_path }}/*.charm
