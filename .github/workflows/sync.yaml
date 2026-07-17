@@ -99,8 +99,8 @@ jobs:
 
           args=()
           while IFS= read -r line; do
-            [[ -n "$line" ]] && args+=("$line")
-          done < <(echo "$INPUTS_JSON" | jq -r 'to_entries[] | "-f \(.key)=\(.value)"')
+            [[ -n "$line" ]] && args+=(-f "$line")
+          done < <(echo "$INPUTS_JSON" | jq -r 'to_entries[] | "\(.key)=\(.value)"')
 
           gh workflow run "$WORKFLOW" -R "$TARGET_REPO" --ref "$REF" "${args[@]}"
 
