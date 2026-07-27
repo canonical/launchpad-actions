@@ -15,6 +15,13 @@ on:
         description: Commit SHA to checkout
         type: string
         required: true
+      full_checkout:
+        description: >-
+          Clone full history and tags instead of a shallow checkout.
+          Needed when the build derives its version from `git describe`.
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   packages: write
@@ -34,10 +41,18 @@ jobs:
           REPO_BRANCH: ${{ inputs.repo_branch }}
           REPO_URL: ${{ inputs.repo_url }}
           COMMIT_SHA: ${{ inputs.commit_sha }}
+          FULL_CHECKOUT: ${{ inputs.full_checkout }}
         run: |
-          git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" upstream-repo
-          cd upstream-repo
-          git fetch --depth 1 origin "$COMMIT_SHA"
+          if [ "$FULL_CHECKOUT" = "true" ]; then
+            # Full clone (with tags)
+            git clone --branch "$REPO_BRANCH" "$REPO_URL" upstream-repo
+            cd upstream-repo
+            git fetch origin "$COMMIT_SHA"
+          else
+            git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" upstream-repo
+            cd upstream-repo
+            git fetch --depth 1 origin "$COMMIT_SHA"
+          fi
           git checkout "$COMMIT_SHA"
 
       - name: Setup LXD
