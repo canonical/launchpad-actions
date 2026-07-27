@@ -351,6 +351,7 @@ to `ghcr.io/<calling-repo>:<commit_sha>`.
 | `runner_arch` | No | Runner architecture: `amd64` (default), `arm64`, `ppc64el`, `s390x` |
 | `runner_base` | No | Runner base image: `focal`, `jammy`, `noble` (default) |
 | `runner_flavor` | No | Runner flavor: `small`, `medium`, `large` (default), `large-extra`, `xlarge`, `xlarge-extra` |
+| `full_checkout` | No | Clone full history and tags instead of a shallow checkout |
 
 **Permissions required:** `packages: write`
 
