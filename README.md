@@ -93,6 +93,7 @@ to `ghcr.io/<calling-repo>:<commit_sha>`.
 | `repo_url` | Yes | Repository URL to clone and build |
 | `repo_branch` | Yes | Branch to check out from the upstream repo |
 | `commit_sha` | Yes | Commit SHA used as the image tag |
+| `full_checkout` | No | Clone full history and tags instead of a shallow checkout |
 
 **Permissions required:** `packages: write`
 
