@@ -47,6 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       cache-hit: ${{ steps.charm-cache.outputs.cache-hit }}
+      cache-key: ${{ steps.charm-cache-key.outputs.key }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -54,12 +55,20 @@ jobs:
           ref: ${{ inputs.commit_sha || github.sha }}
           persist-credentials: false
 
+      # Computed once here, before any build runs and mutates charm_path,
+      # and reused as-is by the save steps below so the key stays stable.
+      - name: Compute charm cache key
+        id: charm-cache-key
+        env:
+          CHARM_HASH: ${{ hashFiles(format('{0}/**', inputs.charm_path)) }}
+        run: echo "key=charm-${CHARM_HASH}" >> "$GITHUB_OUTPUT"
+
       - name: Check charm cache
         id: charm-cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ${{ inputs.charm_path }}/*.charm
-          key: charm-${{ hashFiles(format('{0}/**', inputs.charm_path)) }}
+          key: ${{ steps.charm-cache-key.outputs.key }}
           lookup-only: true
 
   # Use Launchpad remote build when requested.
@@ -131,7 +140,7 @@ jobs:
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ${{ inputs.charm_path }}/*.charm
-          key: charm-${{ hashFiles(format('{0}/**', inputs.charm_path)) }}
+          key: ${{ needs.check-charm-cache.outputs.cache-key }}
 
   # Local build (self-hosted runner, snap-installed charmcraft).
   handle-charm-local:
@@ -170,4 +179,4 @@ jobs:
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ${{ inputs.charm_path }}/*.charm
-          key: charm-${{ hashFiles(format('{0}/**', inputs.charm_path)) }}
+          key: ${{ needs.check-charm-cache.outputs.cache-key }}
