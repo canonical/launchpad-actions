@@ -42,7 +42,7 @@ jobs:
   handle-oci-image:
     runs-on: self-hosted-linux-${{ inputs.runner_arch }}-${{ inputs.runner_base }}-${{ inputs.runner_flavor }}
     env:
-      IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha }}
+      IMAGE_URL: ghcr.io/${{ github.repository }}:${{ inputs.commit_sha }}-${{ inputs.runner_arch }}
     steps:
       - name: Checkout upstream source
         env:

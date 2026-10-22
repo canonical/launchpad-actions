@@ -339,7 +339,7 @@ jobs:
 ### `oci-image.yaml` - Build and push OCI image
 
 Clones an upstream repository, builds a Docker image from it, and pushes it
-to `ghcr.io/<calling-repo>:<commit_sha>`.
+to `ghcr.io/<calling-repo>:<commit_sha>-<runner_arch>`.
 
 **Inputs**
 
