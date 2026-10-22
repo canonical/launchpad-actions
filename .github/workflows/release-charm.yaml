@@ -66,15 +66,26 @@ jobs:
           path: artifacts/charm
 
       - name: Upload charm
+        id: upload
         if: inputs.charm_cache_hit != 'true'
         env:
           CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
           CHARMHUB_NAME: ${{ inputs.charm_name }}
           CHANNEL: ${{ inputs.channel }}
         run: |
-          charmcraft upload artifacts/charm/*.charm \
+          set -uo pipefail
+          if charmcraft upload artifacts/charm/*.charm \
             --name "$CHARMHUB_NAME" \
-            --release "$CHANNEL"
+            --release "$CHANNEL" 2>&1 | tee upload.log; then
+            exit 0
+          fi
+          # Identical charm already uploaded: reuse the existing revision
+          existing=$(sed -nE 's/.*already exists in the database\. Revision of the existing package is: ([0-9]+).*/\1/p' upload.log | head -n1)
+          if [ -z "$existing" ]; then
+            exit 1
+          fi
+          echo "Charm already uploaded as revision $existing, reusing it"
+          echo "existing_revision=$existing" >> "$GITHUB_OUTPUT"
 
       - name: Pull GHCR image
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
